@@ -106,6 +106,10 @@ function App() {
       setStatus(`Connecting to ${device.name}...`);
       const server = await device.gatt.connect();
 
+      if (!server.connected) {
+        await device.gatt.connect();
+      }
+
       let service;
       try {
         service = await server.getPrimaryService(VIBE_SERVICE_UUID);
