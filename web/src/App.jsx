@@ -39,23 +39,28 @@ function App() {
 
   const sendVibeCommand = async (rawValue) => {
     if (!bleChars.length) return;
-    const scaledValue = Math.min(255, Math.floor((rawValue / 100) * 255));
+    const s = Math.min(255, Math.floor((rawValue / 100) * 255));
+
+    // Shotgun approach: Try every common protocol
+    const cmds = [
+      new Uint8Array([s]),                        // Raw
+      new Uint8Array([0x01, s]),                  // Common Op 1
+      new Uint8Array([0x03, s]),                  // Common Op 3
+      new Uint8Array([0x0F, 0x03, 0x00, s, s]),   // Satisfyer/Generic
+      new Uint8Array([0x01, 0x01, s]),            // Hismith/Standard
+      new Uint8Array([0x02, s, 0x00]),            // Fitness
+    ];
 
     for (const char of bleChars) {
-      try {
-        if (char.uuid.includes('2ad9')) {
-          await char.writeValue(new Uint8Array([0x02, scaledValue, 0x00]));
-        } else {
-          // Try multiple formats for specialized vibe hardware
-          const vibeCmd = new Uint8Array([0x0F, 0x03, 0x00, scaledValue, scaledValue]);
-          try { await char.writeValue(vibeCmd); } catch (e) { }
-          try { await char.writeValue(new Uint8Array([scaledValue])); } catch (e) { }
-        }
-        addLog(`Sent vibe ${rawValue}% to ${char.uuid.substring(0, 8)}`);
-      } catch (err) {
-        addLog(`Write error on ${char.uuid.substring(0, 4)}: ${err.message}`);
+      for (const cmd of cmds) {
+        try {
+          // Use withoutResponse for speed
+          await char.writeValueWithoutResponse(cmd);
+          await new Promise(r => setTimeout(r, 10));
+        } catch (e) { }
       }
     }
+    addLog(`Vibe ${rawValue}% Shotgun Sent`);
   };
 
   const connectWS = () => {
