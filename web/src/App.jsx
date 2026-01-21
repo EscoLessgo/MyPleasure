@@ -65,33 +65,47 @@ function App() {
   const connectBLE = async () => {
     try {
       setStatus('Scanning for TrueForm...');
+
+      const FITNESS_SERVICE = '00001814-0000-1000-8000-00805f9b34fb';
+
       const device = await navigator.bluetooth.requestDevice({
-        filters: [{ services: [BLE_SERVICE_UUID] }],
-        optionalServices: [BLE_SERVICE_UUID]
+        filters: [
+          { namePrefix: 'TrueForm' },
+          { name: 'TrueForm3' },
+          { services: [BLE_SERVICE_UUID] },
+          { services: ['00001814-0000-1000-8000-00805f9b34fb'] }
+        ],
+        optionalServices: [BLE_SERVICE_UUID, FITNESS_SERVICE]
       });
 
       setStatus(`Connecting to ${device.name}...`);
       const server = await device.gatt.connect();
-      const service = await server.getPrimaryService(BLE_SERVICE_UUID);
 
-      // Attempt to find the speed characteristic. 
-      // User may need to specify the exact UUID.
-      // We can list all if unknown.
+      let service;
+      try {
+        service = await server.getPrimaryService(FITNESS_SERVICE);
+      } catch (e) {
+        service = await server.getPrimaryService(BLE_SERVICE_UUID);
+      }
+
+      setStatus(`Fetching characteristics...`);
       const characteristics = await service.getCharacteristics();
       console.log('Available Characteristics:', characteristics.map(c => c.uuid));
 
-      // For now, use the first one or a specific one if found
-      const char = characteristics[0]; // Fallback
+      // 0x2AD9 is Fitness Machine Control Point
+      const controlPoint = characteristics.find(c => c.uuid.includes('2ad9'));
+      const char = controlPoint || characteristics.find(c => c.properties.write) || characteristics[0];
+
       setBleChar(char);
       setBleDevice(device);
       setStatus(`BLE Connected: ${device.name}`);
 
       if (ws) {
-        ws.send(JSON.stringify({ action: 'status', value: 'BLE Connected' }));
+        ws.send(JSON.stringify({ action: 'status', value: `Connected: ${device.name}` }));
       }
     } catch (err) {
       console.error('BLE Error:', err);
-      setStatus('BLE Connection Failed');
+      setStatus(`BLE Error: ${err.message || 'Failed'}`);
     }
   };
 
