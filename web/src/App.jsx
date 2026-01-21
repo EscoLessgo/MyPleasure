@@ -41,26 +41,27 @@ function App() {
     if (!bleChars.length) return;
     const s = Math.min(255, Math.floor((rawValue / 100) * 255));
 
-    // Shotgun approach: Try every common protocol
+    // Shotgun approach: Try text and hex patterns
     const cmds = [
-      new Uint8Array([s]),                        // Raw
-      new Uint8Array([0x01, s]),                  // Common Op 1
-      new Uint8Array([0x03, s]),                  // Common Op 3
-      new Uint8Array([0x0F, 0x03, 0x00, s, s]),   // Satisfyer/Generic
-      new Uint8Array([0x01, 0x01, s]),            // Hismith/Standard
-      new Uint8Array([0x02, s, 0x00]),            // Fitness
+      new Uint8Array([s]),                                // Raw Byte
+      new TextEncoder().encode(`Vibrate:${rawValue};`),   // Lovense/Text style
+      new Uint8Array([0x01, 0x01, s]),                    // Hismith/Standard
+      new Uint8Array([0x0F, 0x03, 0x00, s, s]),           // Generic Massage
+      new Uint8Array([0x55, 0x04, 0x03, 0x00, s, s ^ 0x01]), // Checksum style
     ];
 
+    addLog(`Sending Precision Shotgun...`);
     for (const char of bleChars) {
       for (const cmd of cmds) {
         try {
-          // Use withoutResponse for speed
-          await char.writeValueWithoutResponse(cmd);
-          await new Promise(r => setTimeout(r, 10));
+          // Use writeValueWithResponse for reliability since we had disconnects
+          await char.writeValue(cmd);
+          // Wait 200ms between patterns to prevent hardware crash
+          await new Promise(r => setTimeout(r, 200));
         } catch (e) { }
       }
     }
-    addLog(`Vibe ${rawValue}% Shotgun Sent`);
+    addLog(`Shotgun Sequence Finished`);
   };
 
   const connectWS = () => {
@@ -121,7 +122,7 @@ function App() {
 
       addLog('Discovering Services...');
       const services = await server.getPrimaryServices();
-      addLog(`Found ${services.length} services`);
+      addLog(`Services: ${services.map(s => s.uuid.substring(0, 4)).join(', ')}`);
 
       // Try specialized vibe service first
       let service = services.find(s => s.uuid.toLowerCase().includes('5833ff01')) ||
