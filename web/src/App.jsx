@@ -19,7 +19,7 @@ function App() {
   const [status, setStatus] = useState('Disconnected');
   const [ws, setWs] = useState(null);
   const [bleDevice, setBleDevice] = useState(null);
-  const [bleChar, setBleChar] = useState(null);
+  const [bleChars, setBleChars] = useState([]); // Changed to array to try multiple
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -32,6 +32,7 @@ function App() {
   }, []);
 
   const connectWS = () => {
+    if (ws) ws.close();
     const socket = new WebSocket(`${WS_URL}?deviceId=${deviceId}&type=${role}`);
 
     socket.onopen = () => {
@@ -44,28 +45,32 @@ function App() {
       if (role === 'bridge' && msg.action === 'speed') {
         const rawValue = parseInt(msg.value);
         setSpeed(rawValue);
-        if (bleChar) {
+        if (bleChars.length > 0) {
           try {
-            // Scale 0-100 to 0-255 for hardware
             const scaledValue = Math.min(255, Math.floor((rawValue / 100) * 255));
             console.log(`Hardware Command: UI=${rawValue} -> Scaled=${scaledValue}`);
 
-            // Format A: Standard Fitness Control (Op 0x02)
-            if (bleChar.uuid.includes('2ad9')) {
-              await bleChar.writeValue(new Uint8Array([0x02, scaledValue, 0x00]));
-            }
-            // Format B: Common Specialized Vibe [0x01, 0x01, value]
-            else if (bleChar.service.uuid.includes('5833ff01')) {
-              // Try writing raw value first, but also log for user
-              await bleChar.writeValue(new Uint8Array([scaledValue]));
-              // Potential alternative: await bleChar.writeValue(new Uint8Array([0x01, 0x01, scaledValue]));
-            }
-            // Format C: Generic Raw Write
-            else {
-              await bleChar.writeValue(new Uint8Array([scaledValue]));
-            }
+            // Try writing to ALL writable characteristics found
+            for (const char of bleChars) {
+              try {
+                if (char.uuid.includes('2ad9')) {
+                  await char.writeValue(new Uint8Array([0x02, scaledValue, 0x00]));
+                } else {
+                  // This is the common "Vibe" packet format for many devices:
+                  // [0x0F, 0x03, 0x00, speed, speed]
+                  const vibeCmd = new Uint8Array([0x0F, 0x03, 0x00, scaledValue, scaledValue]);
 
-            console.log('BLE Write Successful');
+                  // Try specialized vibe command
+                  await char.writeValue(vibeCmd);
+
+                  // fallback to raw single byte if the above fails or doesn't work
+                  await char.writeValue(new Uint8Array([scaledValue]));
+                }
+                console.log(`Success writing to ${char.uuid}`);
+              } catch (e) {
+                console.warn(`Failed writing to ${char.uuid}: ${e.message}`);
+              }
+            }
           } catch (err) {
             console.error('BLE Write Error:', err);
             setStatus(`Err: ${err.message}`);
@@ -92,7 +97,6 @@ function App() {
         filters: [
           { name: 'J-TrueForm3' },
           { namePrefix: 'J-' },
-          { namePrefix: 'TrueForm' },
           { services: [VIBE_SERVICE_UUID] },
           { services: [BLE_SERVICE_UUID] }
         ],
@@ -102,7 +106,6 @@ function App() {
       setStatus(`Connecting to ${device.name}...`);
       const server = await device.gatt.connect();
 
-      // Try services in order of specificity
       let service;
       try {
         service = await server.getPrimaryService(VIBE_SERVICE_UUID);
@@ -115,20 +118,14 @@ function App() {
       }
 
       setStatus(`Fetching characteristics...`);
-      const characteristics = await service.getCharacteristics();
-      console.log('Available Characteristics:', characteristics.map(c => ({
-        uuid: c.uuid,
-        props: c.properties
-      })));
+      const chars = await service.getCharacteristics();
 
-      // Logic to find the control characteristic
-      const char = characteristics.find(c => c.properties.write || c.properties.writeWithoutResponse) || characteristics[0];
+      // Keep only writable ones
+      const writableChars = chars.filter(c => c.properties.write || c.properties.writeWithoutResponse);
 
-      if (!char.properties.write && !char.properties.writeWithoutResponse) {
-        setStatus('Warning: Selected char is NOT writable');
-      }
+      console.log('Writable Chars:', writableChars.map(c => c.uuid));
 
-      setBleChar(char);
+      setBleChars(writableChars);
       setBleDevice(device);
       setStatus(`BLE Connected: ${device.name}`);
 
@@ -146,6 +143,10 @@ function App() {
     setSpeed(val);
     if (ws && role === 'controller') {
       ws.send(JSON.stringify({ action: 'speed', value: val }));
+    } else if (role === 'bridge') {
+      // Allow local testing to trigger the message handler logic
+      const event = { data: JSON.stringify({ action: 'speed', value: val }) };
+      socket.onmessage(event);
     }
   };
 
@@ -171,12 +172,16 @@ function App() {
       <main>
         <div className="config-card">
           <label>Device ID:</label>
-          <input
-            type="text"
-            value={deviceId}
-            onChange={(e) => setDeviceId(e.target.value)}
-            disabled={connected}
-          />
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <input
+              type="text"
+              value={deviceId}
+              onChange={(e) => setDeviceId(e.target.value)}
+              disabled={connected}
+              style={{ flex: 1 }}
+            />
+            {connected && <button onClick={() => setConnected(false)} className="btn secondary" style={{ padding: '8px 12px' }}>Reset</button>}
+          </div>
           {!connected && <button onClick={connectWS} className="btn">Connect WebSocket</button>}
         </div>
 
@@ -190,22 +195,52 @@ function App() {
               <span className="label">Current Speed:</span>
               <span className="value">{speed}</span>
             </div>
-            <button
-              onClick={() => updateSpeed(100)}
-              className="btn secondary"
-              style={{ marginTop: '10px' }}
-              disabled={!bleChar}
-            >
-              Test Vibe (100%)
-            </button>
-            <button
-              onClick={() => updateSpeed(0)}
-              className="btn secondary"
-              style={{ marginTop: '5px', background: '#475569' }}
-              disabled={!bleChar}
-            >
-              Stop
-            </button>
+            {bleDevice && bleChars.length > 0 && (
+              <div style={{ fontSize: '10px', color: '#94a3b8', textAlign: 'center' }}>
+                Active Chars: {bleChars.map(c => c.uuid.substring(0, 8)).join(', ')}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: '10px', marginTop: '15px' }}>
+              <button
+                onClick={() => {
+                  const val = 100;
+                  setSpeed(val);
+                  // Manually trigger logic
+                  const mockEvent = { data: JSON.stringify({ action: 'speed', value: val }) };
+                  const socket = {
+                    onmessage: async (e) => {
+                      const msg = JSON.parse(e.data);
+                      // Inline the logic for testing
+                      for (const char of bleChars) {
+                        const scaled = 255;
+                        try { await char.writeValue(new Uint8Array([0x0F, 0x03, 0x00, scaled, scaled])); } catch (e) { }
+                        try { await char.writeValue(new Uint8Array([scaled])); } catch (e) { }
+                      }
+                    }
+                  };
+                  socket.onmessage(mockEvent);
+                }}
+                className="btn secondary"
+                style={{ flex: 1 }}
+                disabled={!bleDevice}
+              >
+                Test 100%
+              </button>
+              <button
+                onClick={() => {
+                  setSpeed(0);
+                  for (const char of bleChars) {
+                    char.writeValue(new Uint8Array([0x0F, 0x03, 0x00, 0, 0])).catch(() => { });
+                    char.writeValue(new Uint8Array([0])).catch(() => { });
+                  }
+                }}
+                className="btn secondary"
+                style={{ flex: 1, background: '#475569' }}
+                disabled={!bleDevice}
+              >
+                Stop
+              </button>
+            </div>
           </div>
         )}
 
