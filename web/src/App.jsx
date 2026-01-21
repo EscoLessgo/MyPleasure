@@ -7,9 +7,9 @@ const host = window.location.host.includes('5173')
   ? 'localhost:8080'
   : window.location.host;
 const WS_URL = `${protocol}//${host}`;
-const BLE_SERVICE_UUID = 'ffa0'; // Main service from logs
-const VIBE_SERVICE_UUID = '5833ff01-9b8b-5191-6142-22a4536ef123'; // Specific long service from logs
-const FITNESS_SERVICE = '00001814-0000-1000-8000-00805f9b34fb';
+const BLE_SERVICE_UUID = 0xffa0; // Corrected to hex alias
+const VIBE_SERVICE_UUID = '5833ff01-9b8b-5191-6142-22a4536ef123';
+const FITNESS_SERVICE = 0x1814;
 
 function App() {
   const [role, setRole] = useState(null); // 'controller' or 'bridge'
