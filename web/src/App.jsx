@@ -3,7 +3,10 @@ import './App.css';
 
 // Config - Adjust WebSocket URL to your deployment
 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-const WS_URL = `${protocol}//${window.location.host}`;
+const host = window.location.host.includes('5173')
+  ? 'localhost:8080'
+  : window.location.host;
+const WS_URL = `${protocol}//${host}`;
 const BLE_SERVICE_UUID = '0000ffa0-0000-1000-8000-00805f9b34fb'; // Common expansion for 16-bit UUID 'ffa0'
 const BLE_CHAR_UUID = '0000ffa1-0000-1000-8000-00805f9b34fb'; // Placeholder - user should verify
 
