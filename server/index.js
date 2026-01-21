@@ -2,9 +2,18 @@ const express = require('express');
 const { WebSocketServer } = require('ws');
 const http = require('http');
 const cors = require('cors');
+const path = require('path');
 
 const app = express();
 app.use(cors());
+
+// Serve static files from the React app
+app.use(express.static(path.join(__dirname, '../web/dist')));
+
+// Fallback for SPA routing
+app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, '../web/dist/index.html'));
+});
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
@@ -28,7 +37,7 @@ wss.on('connection', (ws, req) => {
     ws.on('message', (data) => {
         const message = data.toString();
         // console.log(`Message from ${clientType} [${deviceId}]: ${message}`);
-        
+
         // Broadcast to all other clients in the same room
         clients.forEach(client => {
             if (client !== ws && client.readyState === 1) { // 1 = OPEN
