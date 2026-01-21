@@ -48,21 +48,27 @@ function App() {
           try {
             // Scale 0-100 to 0-255 for hardware
             const scaledValue = Math.min(255, Math.floor((rawValue / 100) * 255));
+            console.log(`Hardware Command: UI=${rawValue} -> Scaled=${scaledValue}`);
 
-            // Try different write formats
+            // Format A: Standard Fitness Control (Op 0x02)
             if (bleChar.uuid.includes('2ad9')) {
-              // Fitness Machine Control Point OpCode 0x02 (Set Target Speed)
-              // Speed is often value * 100, sent as 2 bytes
-              const data = new Uint8Array([0x02, scaledValue, 0x00]);
-              await bleChar.writeValue(data);
-            } else {
-              // Standard raw single byte write (most common for simple devices)
+              await bleChar.writeValue(new Uint8Array([0x02, scaledValue, 0x00]));
+            }
+            // Format B: Common Specialized Vibe [0x01, 0x01, value]
+            else if (bleChar.service.uuid.includes('5833ff01')) {
+              // Try writing raw value first, but also log for user
+              await bleChar.writeValue(new Uint8Array([scaledValue]));
+              // Potential alternative: await bleChar.writeValue(new Uint8Array([0x01, 0x01, scaledValue]));
+            }
+            // Format C: Generic Raw Write
+            else {
               await bleChar.writeValue(new Uint8Array([scaledValue]));
             }
-            console.log(`BLE Write: UI=${rawValue} -> Hardware=${scaledValue}`);
+
+            console.log('BLE Write Successful');
           } catch (err) {
             console.error('BLE Write Error:', err);
-            setStatus('BLE Write Error');
+            setStatus(`Err: ${err.message}`);
           }
         }
       } else if (role === 'controller' && msg.action === 'status') {
@@ -184,6 +190,22 @@ function App() {
               <span className="label">Current Speed:</span>
               <span className="value">{speed}</span>
             </div>
+            <button
+              onClick={() => updateSpeed(100)}
+              className="btn secondary"
+              style={{ marginTop: '10px' }}
+              disabled={!bleChar}
+            >
+              Test Vibe (100%)
+            </button>
+            <button
+              onClick={() => updateSpeed(0)}
+              className="btn secondary"
+              style={{ marginTop: '5px', background: '#475569' }}
+              disabled={!bleChar}
+            >
+              Stop
+            </button>
           </div>
         )}
 
