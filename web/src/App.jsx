@@ -7,8 +7,8 @@ const host = window.location.host.includes('5173')
   ? 'localhost:8080'
   : window.location.host;
 const WS_URL = `${protocol}//${host}`;
-const BLE_SERVICE_UUID = 0xffa0; // Corrected to hex alias
-const VIBE_SERVICE_UUID = '5833ff01-9b8b-5191-6142-22a4536ef123';
+const BLE_SERVICE_UUID = 0xffa0; // Main service from logs
+const VIBE_SERVICE_UUID = '5833ff01-9b8b-5191-6142-22a4536ef123'; // Specific long service from logs
 const FITNESS_SERVICE = 0x1814;
 
 function App() {
@@ -19,7 +19,13 @@ function App() {
   const [status, setStatus] = useState('Disconnected');
   const [ws, setWs] = useState(null);
   const [bleDevice, setBleDevice] = useState(null);
-  const [bleChars, setBleChars] = useState([]); // Changed to array to try multiple
+  const [bleChars, setBleChars] = useState([]);
+  const [log, setLog] = useState([]);
+
+  const addLog = (msg) => {
+    setLog(prev => [msg, ...prev].slice(0, 10));
+    console.log(`[LOG]: ${msg}`);
+  };
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -31,6 +37,27 @@ function App() {
     if (id) setDeviceId(id);
   }, []);
 
+  const sendVibeCommand = async (rawValue) => {
+    if (!bleChars.length) return;
+    const scaledValue = Math.min(255, Math.floor((rawValue / 100) * 255));
+
+    for (const char of bleChars) {
+      try {
+        if (char.uuid.includes('2ad9')) {
+          await char.writeValue(new Uint8Array([0x02, scaledValue, 0x00]));
+        } else {
+          // Try multiple formats for specialized vibe hardware
+          const vibeCmd = new Uint8Array([0x0F, 0x03, 0x00, scaledValue, scaledValue]);
+          try { await char.writeValue(vibeCmd); } catch (e) { }
+          try { await char.writeValue(new Uint8Array([scaledValue])); } catch (e) { }
+        }
+        addLog(`Sent vibe ${rawValue}% to ${char.uuid.substring(0, 8)}`);
+      } catch (err) {
+        addLog(`Write error on ${char.uuid.substring(0, 4)}: ${err.message}`);
+      }
+    }
+  };
+
   const connectWS = () => {
     if (ws) ws.close();
     const socket = new WebSocket(`${WS_URL}?deviceId=${deviceId}&type=${role}`);
@@ -38,44 +65,15 @@ function App() {
     socket.onopen = () => {
       setStatus('Connected to Server');
       setConnected(true);
+      addLog('WebSocket Linked');
     };
 
     socket.onmessage = async (event) => {
       const msg = JSON.parse(event.data);
       if (role === 'bridge' && msg.action === 'speed') {
-        const rawValue = parseInt(msg.value);
-        setSpeed(rawValue);
-        if (bleChars.length > 0) {
-          try {
-            const scaledValue = Math.min(255, Math.floor((rawValue / 100) * 255));
-            console.log(`Hardware Command: UI=${rawValue} -> Scaled=${scaledValue}`);
-
-            // Try writing to ALL writable characteristics found
-            for (const char of bleChars) {
-              try {
-                if (char.uuid.includes('2ad9')) {
-                  await char.writeValue(new Uint8Array([0x02, scaledValue, 0x00]));
-                } else {
-                  // This is the common "Vibe" packet format for many devices:
-                  // [0x0F, 0x03, 0x00, speed, speed]
-                  const vibeCmd = new Uint8Array([0x0F, 0x03, 0x00, scaledValue, scaledValue]);
-
-                  // Try specialized vibe command
-                  await char.writeValue(vibeCmd);
-
-                  // fallback to raw single byte if the above fails or doesn't work
-                  await char.writeValue(new Uint8Array([scaledValue]));
-                }
-                console.log(`Success writing to ${char.uuid}`);
-              } catch (e) {
-                console.warn(`Failed writing to ${char.uuid}: ${e.message}`);
-              }
-            }
-          } catch (err) {
-            console.error('BLE Write Error:', err);
-            setStatus(`Err: ${err.message}`);
-          }
-        }
+        const val = parseInt(msg.value);
+        setSpeed(val);
+        sendVibeCommand(val);
       } else if (role === 'controller' && msg.action === 'status') {
         setStatus(`Bridge: ${msg.value}`);
       }
@@ -84,6 +82,7 @@ function App() {
     socket.onclose = () => {
       setStatus('Disconnected from Server');
       setConnected(false);
+      addLog('WebSocket Disconnected');
     };
 
     setWs(socket);
@@ -91,66 +90,70 @@ function App() {
 
   const connectBLE = async () => {
     try {
-      setStatus('Scanning for TrueForm...');
-
+      addLog('Scanning for J-TrueForm3...');
+      setStatus('Scanning...');
       const device = await navigator.bluetooth.requestDevice({
-        filters: [
-          { name: 'J-TrueForm3' },
-          { namePrefix: 'J-' },
-          { services: [VIBE_SERVICE_UUID] },
-          { services: [BLE_SERVICE_UUID] }
-        ],
+        filters: [{ name: 'J-TrueForm3' }, { namePrefix: 'J-' }],
         optionalServices: [VIBE_SERVICE_UUID, BLE_SERVICE_UUID, FITNESS_SERVICE]
       });
 
-      setStatus(`Connecting to ${device.name}...`);
-      const server = await device.gatt.connect();
+      const onDisconnect = () => {
+        addLog('BLE Hardware Disconnected');
+        setStatus('Disconnected');
+        setBleDevice(null);
+        setBleChars([]);
+      };
+      device.addEventListener('gattserverdisconnected', onDisconnect);
 
+      addLog('Connecting to GATT Server...');
+      let server = await device.gatt.connect();
+
+      // Retry logic if not connected
       if (!server.connected) {
-        await device.gatt.connect();
+        addLog('Retrying GATT Connect...');
+        server = await device.gatt.connect();
       }
 
-      let service;
-      try {
-        service = await server.getPrimaryService(VIBE_SERVICE_UUID);
-      } catch (e) {
-        try {
-          service = await server.getPrimaryService(BLE_SERVICE_UUID);
-        } catch (e2) {
-          service = await server.getPrimaryService(FITNESS_SERVICE);
-        }
-      }
+      addLog('Discovering Services...');
+      const services = await server.getPrimaryServices();
+      addLog(`Found ${services.length} services`);
 
-      setStatus(`Fetching characteristics...`);
+      // Try specialized vibe service first
+      let service = services.find(s => s.uuid.toLowerCase().includes('5833ff01')) ||
+        services.find(s => s.uuid.toLowerCase().includes('ffa0')) ||
+        services[0];
+
+      if (!service) throw new Error('No compatible services found');
+
+      addLog(`Using service: ${service.uuid.substring(0, 8)}`);
       const chars = await service.getCharacteristics();
-
-      // Keep only writable ones
       const writableChars = chars.filter(c => c.properties.write || c.properties.writeWithoutResponse);
 
-      console.log('Writable Chars:', writableChars.map(c => c.uuid));
+      if (writableChars.length === 0) throw new Error('No writable characteristics found');
 
+      addLog(`Ready! Linked ${writableChars.length} channels`);
       setBleChars(writableChars);
       setBleDevice(device);
-      setStatus(`BLE Connected: ${device.name}`);
+      setStatus('Hardware Ready');
 
       if (ws) {
-        ws.send(JSON.stringify({ action: 'status', value: `Active: ${device.name}` }));
+        ws.send(JSON.stringify({ action: 'status', value: 'Bridge Online & Connected' }));
       }
     } catch (err) {
-      console.error('BLE Error:', err);
-      setStatus(`BLE Error: ${err.message || 'Failed'}`);
+      addLog(`BLE Error: ${err.message}`);
+      setStatus('BLE Failed');
     }
   };
 
-  const updateSpeed = (newSpeed) => {
-    const val = parseInt(newSpeed);
+  const updateSpeed = (valStr) => {
+    const val = parseInt(valStr);
     setSpeed(val);
     if (ws && role === 'controller') {
       ws.send(JSON.stringify({ action: 'speed', value: val }));
-    } else if (role === 'bridge') {
-      // Allow local testing to trigger the message handler logic
-      const event = { data: JSON.stringify({ action: 'speed', value: val }) };
-      socket.onmessage(event);
+    }
+    // Local testing for bridge role
+    if (role === 'bridge') {
+      sendVibeCommand(val);
     }
   };
 
@@ -169,7 +172,7 @@ function App() {
   return (
     <div className={`app-container ${role}`}>
       <header>
-        <h1>TrueForm {role === 'bridge' ? 'Bridge' : 'Controller'}</h1>
+        <h1>{role === 'bridge' ? 'Bridge Mode' : 'Controller Mode'}</h1>
         <div className="status-badge" data-status={connected}>{status}</div>
       </header>
 
@@ -184,66 +187,50 @@ function App() {
               disabled={connected}
               style={{ flex: 1 }}
             />
-            {connected && <button onClick={() => setConnected(false)} className="btn secondary" style={{ padding: '8px 12px' }}>Reset</button>}
+            {connected && <button onClick={() => setConnected(false)} className="btn secondary" style={{ padding: '8px 12px' }}>Reset Link</button>}
           </div>
           {!connected && <button onClick={connectWS} className="btn">Connect WebSocket</button>}
         </div>
 
         {role === 'bridge' && (
           <div className="action-card">
-            <h2>Bridge Control</h2>
+            <h2>Hardware Connection</h2>
             <button onClick={connectBLE} className="btn" disabled={!connected || bleDevice}>
               {bleDevice ? 'BLE Connected' : 'Connect Treadmill (BLE)'}
             </button>
             <div className="speed-display">
-              <span className="label">Current Speed:</span>
-              <span className="value">{speed}</span>
+              <span className="label">Power Level:</span>
+              <span className="value">{speed}%</span>
             </div>
-            {bleDevice && bleChars.length > 0 && (
-              <div style={{ fontSize: '10px', color: '#94a3b8', textAlign: 'center' }}>
-                Active Chars: {bleChars.map(c => c.uuid.substring(0, 8)).join(', ')}
-              </div>
-            )}
+
             <div style={{ display: 'flex', gap: '10px', marginTop: '15px' }}>
               <button
-                onClick={() => {
-                  const val = 100;
-                  setSpeed(val);
-                  // Manually trigger logic
-                  const mockEvent = { data: JSON.stringify({ action: 'speed', value: val }) };
-                  const socket = {
-                    onmessage: async (e) => {
-                      const msg = JSON.parse(e.data);
-                      // Inline the logic for testing
-                      for (const char of bleChars) {
-                        const scaled = 255;
-                        try { await char.writeValue(new Uint8Array([0x0F, 0x03, 0x00, scaled, scaled])); } catch (e) { }
-                        try { await char.writeValue(new Uint8Array([scaled])); } catch (e) { }
-                      }
-                    }
-                  };
-                  socket.onmessage(mockEvent);
-                }}
+                onClick={() => updateSpeed(100)}
                 className="btn secondary"
                 style={{ flex: 1 }}
                 disabled={!bleDevice}
               >
-                Test 100%
+                Pulse 100%
               </button>
               <button
-                onClick={() => {
-                  setSpeed(0);
-                  for (const char of bleChars) {
-                    char.writeValue(new Uint8Array([0x0F, 0x03, 0x00, 0, 0])).catch(() => { });
-                    char.writeValue(new Uint8Array([0])).catch(() => { });
-                  }
-                }}
+                onClick={() => updateSpeed(0)}
                 className="btn secondary"
                 style={{ flex: 1, background: '#475569' }}
                 disabled={!bleDevice}
               >
                 Stop
               </button>
+            </div>
+
+            <div className="debug-console" style={{ marginTop: '20px', padding: '15px', background: 'rgba(0,0,0,0.3)', borderRadius: '12px', fontSize: '12px' }}>
+              <h3 style={{ margin: '0 0 10px 0', fontSize: '14px', color: '#94a3b8' }}>System Log</h3>
+              <div style={{ maxHeight: '100px', overflowY: 'auto' }}>
+                {log.length === 0 ? <div style={{ color: '#475569' }}>Waiting for activity...</div> : log.map((msg, i) => (
+                  <div key={i} style={{ marginBottom: '4px', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '2px' }}>
+                    {msg}
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         )}
