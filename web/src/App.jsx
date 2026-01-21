@@ -41,11 +41,24 @@ function App() {
     socket.onmessage = async (event) => {
       const msg = JSON.parse(event.data);
       if (role === 'bridge' && msg.action === 'speed') {
-        setSpeed(msg.value);
+        const rawValue = parseInt(msg.value);
+        setSpeed(rawValue);
         if (bleChar) {
           try {
-            await bleChar.writeValue(new Uint8Array([msg.value]));
-            console.log('BLE Write Success:', msg.value);
+            // Scale 0-100 to 0-255 for hardware
+            const scaledValue = Math.min(255, Math.floor((rawValue / 100) * 255));
+
+            // Try different write formats
+            if (bleChar.uuid.includes('2ad9')) {
+              // Fitness Machine Control Point OpCode 0x02 (Set Target Speed)
+              // Speed is often value * 100, sent as 2 bytes
+              const data = new Uint8Array([0x02, scaledValue, 0x00]);
+              await bleChar.writeValue(data);
+            } else {
+              // Standard raw single byte write (most common for simple devices)
+              await bleChar.writeValue(new Uint8Array([scaledValue]));
+            }
+            console.log(`BLE Write: UI=${rawValue} -> Hardware=${scaledValue}`);
           } catch (err) {
             console.error('BLE Write Error:', err);
             setStatus('BLE Write Error');
@@ -98,7 +111,12 @@ function App() {
 
       // 0x2AD9 is Fitness Machine Control Point
       const controlPoint = characteristics.find(c => c.uuid.includes('2ad9'));
+      // Prefer control point, then writeable, then first characteristic
       const char = controlPoint || characteristics.find(c => c.properties.write) || characteristics[0];
+
+      if (!char.properties.write && !char.properties.writeWithoutResponse) {
+        setStatus('Warning: Char not writable');
+      }
 
       setBleChar(char);
       setBleDevice(device);
@@ -114,9 +132,10 @@ function App() {
   };
 
   const updateSpeed = (newSpeed) => {
-    setSpeed(newSpeed);
+    const val = parseInt(newSpeed);
+    setSpeed(val);
     if (ws && role === 'controller') {
-      ws.send(JSON.stringify({ action: 'speed', value: parseInt(newSpeed) }));
+      ws.send(JSON.stringify({ action: 'speed', value: val }));
     }
   };
 
@@ -171,7 +190,7 @@ function App() {
               <input
                 type="range"
                 min="0"
-                max="20"
+                max="100"
                 step="1"
                 value={speed}
                 onChange={(e) => updateSpeed(e.target.value)}
