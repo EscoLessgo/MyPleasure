@@ -73,7 +73,9 @@ function App() {
       const device = await navigator.bluetooth.requestDevice({
         filters: [
           { namePrefix: 'TrueForm' },
+          { namePrefix: 'J-' },
           { name: 'TrueForm3' },
+          { name: 'J-TrueForm3' },
           { services: [BLE_SERVICE_UUID] },
           { services: ['00001814-0000-1000-8000-00805f9b34fb'] }
         ],
