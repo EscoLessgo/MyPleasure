@@ -7,8 +7,9 @@ const host = window.location.host.includes('5173')
   ? 'localhost:8080'
   : window.location.host;
 const WS_URL = `${protocol}//${host}`;
-const BLE_SERVICE_UUID = '0000ffa0-0000-1000-8000-00805f9b34fb'; // Common expansion for 16-bit UUID 'ffa0'
-const BLE_CHAR_UUID = '0000ffa1-0000-1000-8000-00805f9b34fb'; // Placeholder - user should verify
+const BLE_SERVICE_UUID = 'ffa0'; // Main service from logs
+const VIBE_SERVICE_UUID = '5833ff01-9b8b-5191-6142-22a4536ef123'; // Specific long service from logs
+const FITNESS_SERVICE = '00001814-0000-1000-8000-00805f9b34fb';
 
 function App() {
   const [role, setRole] = useState(null); // 'controller' or 'bridge'
@@ -81,41 +82,44 @@ function App() {
     try {
       setStatus('Scanning for TrueForm...');
 
-      const FITNESS_SERVICE = '00001814-0000-1000-8000-00805f9b34fb';
-
       const device = await navigator.bluetooth.requestDevice({
         filters: [
-          { namePrefix: 'TrueForm' },
-          { namePrefix: 'J-' },
-          { name: 'TrueForm3' },
           { name: 'J-TrueForm3' },
-          { services: [BLE_SERVICE_UUID] },
-          { services: ['00001814-0000-1000-8000-00805f9b34fb'] }
+          { namePrefix: 'J-' },
+          { namePrefix: 'TrueForm' },
+          { services: [VIBE_SERVICE_UUID] },
+          { services: [BLE_SERVICE_UUID] }
         ],
-        optionalServices: [BLE_SERVICE_UUID, FITNESS_SERVICE]
+        optionalServices: [VIBE_SERVICE_UUID, BLE_SERVICE_UUID, FITNESS_SERVICE]
       });
 
       setStatus(`Connecting to ${device.name}...`);
       const server = await device.gatt.connect();
 
+      // Try services in order of specificity
       let service;
       try {
-        service = await server.getPrimaryService(FITNESS_SERVICE);
+        service = await server.getPrimaryService(VIBE_SERVICE_UUID);
       } catch (e) {
-        service = await server.getPrimaryService(BLE_SERVICE_UUID);
+        try {
+          service = await server.getPrimaryService(BLE_SERVICE_UUID);
+        } catch (e2) {
+          service = await server.getPrimaryService(FITNESS_SERVICE);
+        }
       }
 
       setStatus(`Fetching characteristics...`);
       const characteristics = await service.getCharacteristics();
-      console.log('Available Characteristics:', characteristics.map(c => c.uuid));
+      console.log('Available Characteristics:', characteristics.map(c => ({
+        uuid: c.uuid,
+        props: c.properties
+      })));
 
-      // 0x2AD9 is Fitness Machine Control Point
-      const controlPoint = characteristics.find(c => c.uuid.includes('2ad9'));
-      // Prefer control point, then writeable, then first characteristic
-      const char = controlPoint || characteristics.find(c => c.properties.write) || characteristics[0];
+      // Logic to find the control characteristic
+      const char = characteristics.find(c => c.properties.write || c.properties.writeWithoutResponse) || characteristics[0];
 
       if (!char.properties.write && !char.properties.writeWithoutResponse) {
-        setStatus('Warning: Char not writable');
+        setStatus('Warning: Selected char is NOT writable');
       }
 
       setBleChar(char);
@@ -123,7 +127,7 @@ function App() {
       setStatus(`BLE Connected: ${device.name}`);
 
       if (ws) {
-        ws.send(JSON.stringify({ action: 'status', value: `Connected: ${device.name}` }));
+        ws.send(JSON.stringify({ action: 'status', value: `Active: ${device.name}` }));
       }
     } catch (err) {
       console.error('BLE Error:', err);
