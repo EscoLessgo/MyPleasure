@@ -374,30 +374,62 @@ video {
   letter-spacing: 2px;
 }
 
-.btn-toggle-freehand {
+.visualizer-actions {
+  display: flex;
+  gap: 10px;
   margin-top: 15px;
+  width: 100%;
+  max-width: 300px;
+}
+
+.btn-toggle-freehand,
+.btn-mic-sync {
+  flex: 1;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.1);
   color: #818cf8;
-  padding: 8px 16px;
+  padding: 10px;
   border-radius: 10px;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 900;
   cursor: pointer;
   text-transform: uppercase;
-  letter-spacing: 1px;
-  transition: all 0.2s;
+  letter-spacing: 1.5px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
 }
 
-.btn-toggle-freehand:hover {
+.btn-toggle-freehand:hover,
+.btn-mic-sync:hover {
   background: rgba(129, 140, 248, 0.1);
   border-color: #818cf8;
+  transform: translateY(-1px);
 }
 
-.btn-toggle-freehand.active {
+.btn-toggle-freehand.active,
+.btn-mic-sync.active {
   background: #6366f1;
   color: white;
   box-shadow: 0 0 15px rgba(99, 102, 241, 0.4);
+}
+
+.btn-mic-sync.active {
+  animation: micPulse 1.5s infinite;
+}
+
+@keyframes micPulse {
+
+  0%,
+  100% {
+    box-shadow: 0 0 15px rgba(99, 102, 241, 0.4);
+  }
+
+  50% {
+    box-shadow: 0 0 25px rgba(99, 102, 241, 0.7);
+  }
 }
 
 .power-guard-section {

@@ -48,10 +48,12 @@ function App() {
   const [ws, setWs] = useState(null);
   const [bleDevice, setBleDevice] = useState(null);
   const [isFreehand, setIsFreehand] = useState(false);
+  const [isMicSync, setIsMicSync] = useState(false);
   const [touchPos, setTouchPos] = useState({ x: 50, y: 50 });
   const bleCharsRef = useRef([]);
   const isWritingRef = useRef(false);
   const lastSentIntensity = useRef(0);
+  const syncIntervalRef = useRef(null);
 
   // --- BLE Functions ---
   const sendCommand = async (mode, intensity) => {
@@ -74,9 +76,46 @@ function App() {
 
   const getIntensityValue = (level) => {
     if (level === 0) return 0;
-    if (level === 1) return 85;  // Low
-    if (level === 2) return 170; // Med
-    return 255;                  // High
+    if (level === 1) return 60;   // Quieter Low
+    if (level === 2) return 145;  // Punchier Med
+    return 255;                  // Max
+  };
+
+  const startAudioAnalysis = (analyzer) => {
+    if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
+    const buffer = new Uint8Array(analyzer.frequencyBinCount);
+
+    syncIntervalRef.current = setInterval(() => {
+      analyzer.getByteFrequencyData(buffer);
+      const average = buffer.reduce((a, b) => a + b) / buffer.length;
+      const intensity = Math.min(255, Math.pow(average / 40, 1.5) * 150);
+
+      if (intensity > 20 && Math.abs(intensity - lastSentIntensity.current) > 10) {
+        lastSentIntensity.current = Math.round(intensity);
+        if (role === 'bridge') sendCommand(1, lastSentIntensity.current);
+        updateRemote('audio-vibe', lastSentIntensity.current);
+      } else if (intensity <= 20 && lastSentIntensity.current !== 0) {
+        lastSentIntensity.current = 0;
+        if (role === 'bridge') sendCommand(0, 0);
+        updateRemote('audio-vibe', 0);
+      }
+    }, 100);
+  };
+
+  const toggleMicSync = async () => {
+    if (isMicSync) {
+      setIsMicSync(false);
+      if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
+      if (role === 'bridge') sendCommand(0, 0);
+    } else {
+      setIsMicSync(true);
+      if (role === 'controller') {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        setupAudioVisualizer(stream, true);
+      } else if (role === 'bridge' && analystRef.current) {
+        startAudioAnalysis(analystRef.current);
+      }
+    }
   };
 
   // --- WebRTC Functions ---
@@ -109,16 +148,22 @@ function App() {
     }
   };
 
-  const setupAudioVisualizer = (stream) => {
+  const setupAudioVisualizer = async (stream, isLocal = false) => {
     if (!audioCanvasRef.current) return;
-    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const source = audioCtx.createMediaStreamSource(stream);
-    const analyzer = audioCtx.createAnalyser();
-    analyzer.fftSize = 256;
-    source.connect(analyzer);
-    audioCtxRef.current = audioCtx;
-    analystRef.current = analyzer;
-    drawAudioWave();
+    try {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyzer = audioCtx.createAnalyser();
+      analyzer.fftSize = 256;
+      source.connect(analyzer);
+      audioCtxRef.current = audioCtx;
+      analystRef.current = analyzer;
+      drawAudioWave();
+
+      if (isLocal) {
+        startAudioAnalysis(analyzer);
+      }
+    } catch (e) { console.error('Audio Setup Fail:', e); }
   };
 
   const drawAudioWave = () => {
@@ -220,8 +265,11 @@ function App() {
         } else if (msg.action === 'freehand') {
           setTouchPos({ x: msg.value.x, y: msg.value.y });
           if (role === 'bridge') {
-            sendCommand(activePatternRef.current, msg.value.intensity);
+            // Force Mode 1 (Steady) for Freehand for absolute speed control
+            sendCommand(1, msg.value.intensity);
           }
+        } else if (msg.action === 'audio-vibe') {
+          if (role === 'bridge') sendCommand(1, msg.value);
         }
       };
     }
@@ -263,25 +311,19 @@ function App() {
 
     setTouchPos({ x: cx, y: cy });
 
-    // Map Y to Intensity (Inverted: top is 255, bottom is 0)
-    const rawIntensity = Math.round((100 - cy) * 2.55);
-    const intensity = Math.max(0, Math.min(255, rawIntensity));
+    // Map Y to Intensity with an exponential curve for better feel
+    // (100-cy) is 0 to 100. We cube it slightly to make lower ranges more precise.
+    const normalizedY = (100 - cy) / 100;
+    const curvedY = Math.pow(normalizedY, 1.2);
+    const intensity = Math.round(curvedY * 255);
 
     // Throttle BLE writes but keep logic smooth
-    if (Math.abs(intensity - lastSentIntensity.current) > 5 || intensity === 0) {
+    if (Math.abs(intensity - lastSentIntensity.current) > 3 || intensity === 0) {
       lastSentIntensity.current = intensity;
 
-      // Map to power segments for UI state feedback
-      let level = 0;
-      if (intensity > 200) level = 3;
-      else if (intensity > 120) level = 2;
-      else if (intensity > 20) level = 1;
-
-      setPowerLevel(level);
-      powerLevelRef.current = level;
-
       if (role === 'bridge') {
-        sendCommand(activePatternRef.current, intensity);
+        // Force Mode 1 for "Lovense Style" seamless control
+        sendCommand(1, intensity);
       }
       updateRemote('freehand', { x: cx, y: cy, intensity });
     }
@@ -507,12 +549,21 @@ function App() {
                     <div className="vibe-label">CYBER-PULSE FEEDBACK</div>
                   </>
                 )}
-                <button
-                  className={`btn-toggle-freehand ${isFreehand ? 'active' : ''}`}
-                  onClick={() => { setIsFreehand(!isFreehand); playSound('select'); }}
-                >
-                  {isFreehand ? 'Switch to Grid' : 'Switch to Freehand'}
-                </button>
+                <div className="visualizer-actions">
+                  <button
+                    className={`btn-toggle-freehand ${isFreehand ? 'active' : ''}`}
+                    onClick={() => { setIsFreehand(!isFreehand); playSound('select'); }}
+                  >
+                    {isFreehand ? 'Grid View' : 'Freehand View'}
+                  </button>
+                  <button
+                    className={`btn-mic-sync ${isMicSync ? 'active' : ''}`}
+                    onClick={() => { toggleMicSync(); playSound('select'); }}
+                    title="Sync Vibe to Voice"
+                  >
+                    🎤 {isMicSync ? 'Sync ON' : 'Sync OFF'}
+                  </button>
+                </div>
               </div>
 
               <div className="power-guard-section">
