@@ -7,13 +7,11 @@ const path = require('path');
 const app = express();
 app.use(cors());
 
-// Serve static files from the React app
-app.use(express.static(path.join(__dirname, '../web/dist')));
-
-// Fallback for SPA routing
-app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, '../web/dist/index.html'));
+// Simple health check endpoint
+app.get('/', (req, res) => {
+    res.send('TrueForm Bridge WebSocket Server Running');
 });
+
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });

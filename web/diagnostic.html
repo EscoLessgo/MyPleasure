@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BLE Device Diagnostic Tool</title>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            background: #0f172a;
+            color: #f8fafc;
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: #818cf8;
+        }
+
+        button {
+            background: #6366f1;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin: 10px 5px;
+            font-size: 16px;
+        }
+
+        button:hover {
+            background: #4f46e5;
+        }
+
+        .log {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+            max-height: 600px;
+            overflow-y: auto;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .service {
+            color: #10b981;
+            font-weight: bold;
+            margin-top: 15px;
+        }
+
+        .char {
+            color: #818cf8;
+            margin-left: 20px;
+        }
+
+        .prop {
+            color: #fbbf24;
+            margin-left: 40px;
+        }
+
+        .success {
+            color: #10b981;
+        }
+
+        .error {
+            color: #ef4444;
+        }
+
+        .test {
+            color: #a78bfa;
+            margin-left: 40px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>🔍 BLE Device Diagnostic Tool</h1>
+    <p>This tool will scan ALL services and characteristics, then test each writable one.</p>
+
+    <div>
+        <button onclick="connect()">1. Connect to Device</button>
+        <button onclick="scanAll()">2. Scan All Characteristics</button>
+        <button onclick="testAll()">3. Test All Writable Chars</button>
+        <button onclick="clearLog()">Clear Log</button>
+    </div>
+
+    <div class="log" id="log"></div>
+
+    <script>
+        let device = null;
+        let server = null;
+        let allChars = [];
+
+        function log(msg, className = '') {
+            const logDiv = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = className;
+            entry.textContent = msg;
+            logDiv.insertBefore(entry, logDiv.firstChild);
+            console.log(msg);
+        }
+
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+        }
+
+        async function connect() {
+            try {
+                log('🔍 Scanning for J-TrueForm3...');
+                device = await navigator.bluetooth.requestDevice({
+                    filters: [{ namePrefix: 'J-' }],
+                    optionalServices: ['0000ffa0-0000-1000-8000-00805f9b34fb']
+                });
+
+                log(`✓ Found: ${device.name}`, 'success');
+
+                server = await device.gatt.connect();
+                log('✓ Connected to GATT server', 'success');
+
+            } catch (err) {
+                log(`✗ Error: ${err.message}`, 'error');
+            }
+        }
+
+        async function scanAll() {
+            if (!server) {
+                log('✗ Connect to device first!', 'error');
+                return;
+            }
+
+            try {
+                log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+                log('📡 SCANNING ALL SERVICES & CHARACTERISTICS');
+                log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+                const services = await server.getPrimaryServices();
+                log(`\nFound ${services.length} service(s):`);
+
+                allChars = [];
+
+                for (const service of services) {
+                    log(`\n🔷 Service: ${service.uuid}`, 'service');
+
+                    const chars = await service.getCharacteristics();
+                    log(`  └─ ${chars.length} characteristic(s):`, 'char');
+
+                    for (const char of chars) {
+                        log(`     ├─ ${char.uuid}`, 'char');
+
+                        const props = [];
+                        if (char.properties.read) props.push('READ');
+                        if (char.properties.write) props.push('WRITE');
+                        if (char.properties.writeWithoutResponse) props.push('WRITE_NO_RESP');
+                        if (char.properties.notify) props.push('NOTIFY');
+                        if (char.properties.indicate) props.push('INDICATE');
+
+                        log(`        Properties: ${props.join(', ')}`, 'prop');
+
+                        // Try to read if readable
+                        if (char.properties.read) {
+                            try {
+                                const value = await char.readValue();
+                                const bytes = Array.from(new Uint8Array(value.buffer))
+                                    .map(b => '0x' + b.toString(16).padStart(2, '0'));
+                                log(`        Current value: [${bytes.join(', ')}]`, 'prop');
+                            } catch (e) {
+                                log(`        Read failed: ${e.message}`, 'prop');
+                            }
+                        }
+
+                        // Store writable characteristics
+                        if (char.properties.write || char.properties.writeWithoutResponse) {
+                            allChars.push({
+                                service: service.uuid,
+                                uuid: char.uuid,
+                                char: char,
+                                props: props
+                            });
+                        }
+                    }
+                }
+
+                log(`\n✓ Scan complete! Found ${allChars.length} writable characteristic(s)`, 'success');
+
+            } catch (err) {
+                log(`✗ Scan error: ${err.message}`, 'error');
+            }
+        }
+
+        async function testAll() {
+            if (allChars.length === 0) {
+                log('✗ Run scan first!', 'error');
+                return;
+            }
+
+            log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+            log('🧪 TESTING ALL WRITABLE CHARACTERISTICS');
+            log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+            // FIRST: Subscribe to all notify characteristics
+            try {
+                log('\n📢 Step 1: Subscribing to notifications first...');
+                const services = await server.getPrimaryServices();
+                for (const service of services) {
+                    const chars = await service.getCharacteristics();
+                    for (const char of chars) {
+                        if (char.properties.notify || char.properties.indicate) {
+                            try {
+                                await char.startNotifications();
+                                char.addEventListener('characteristicvaluechanged', (event) => {
+                                    const value = new Uint8Array(event.target.value.buffer);
+                                    log(`📨 Notification from ${char.uuid}: [${Array.from(value).map(b => '0x' + b.toString(16).padStart(2, '0')).join(', ')}]`, 'success');
+                                });
+                                log(`✓ Subscribed to ${char.uuid}`, 'success');
+                            } catch (e) {
+                                log(`⚠ Couldn't subscribe to ${char.uuid}: ${e.message}`, 'error');
+                            }
+                        }
+                    }
+                }
+            } catch (err) {
+                log(`⚠ Notification setup failed: ${err.message}`, 'error');
+            }
+
+            log('\n📝 Step 2: Now testing commands...');
+            log('**WATCH DEVICE FOR ANY RESPONSE**\n');
+
+            const testCommands = [
+                { name: 'JoyHub v1', data: new Uint8Array([0xff, 0x04, 0x01, 0x00, 0xff]) },
+                { name: 'JoyHub v0', data: new Uint8Array([0xff, 0x04, 0x00, 0x00, 0xff]) },
+                { name: 'Short v1', data: new Uint8Array([0xff, 0x03, 0x01, 0xff]) },
+                { name: 'Lovense', data: new TextEncoder().encode('Vibrate:100;') },
+                { name: 'Raw byte', data: new Uint8Array([0xff]) },
+            ];
+
+            for (let i = 0; i < allChars.length; i++) {
+                const charInfo = allChars[i];
+                log(`\n📝 Testing characteristic ${i + 1}/${allChars.length}:`, 'char');
+                log(`   UUID: ${charInfo.uuid}`, 'char');
+                log(`   Service: ${charInfo.service}`, 'char');
+
+                for (const cmd of testCommands) {
+                    try {
+                        log(`   ► Sending "${cmd.name}": [${Array.from(cmd.data).map(b => '0x' + b.toString(16).padStart(2, '0')).join(', ')}]`, 'test');
+
+                        if (charInfo.char.properties.writeWithoutResponse) {
+                            await charInfo.char.writeValue(cmd.data);
+                        } else {
+                            await charInfo.char.writeValueWithResponse(cmd.data);
+                        }
+
+                        log(`     ✓ Sent successfully`, 'success');
+                        await new Promise(r => setTimeout(r, 500)); // Wait to observe
+
+                    } catch (err) {
+                        log(`     ✗ Failed: ${err.message}`, 'error');
+                    }
+                }
+            }
+
+            log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+            log('✓ TEST COMPLETE!', 'success');
+            log('If device vibrated, note which characteristic and command worked!');
+        }
+    </script>
+</body>
+
+</html>
