@@ -45,8 +45,11 @@ function App() {
   const [status, setStatus] = useState('Disconnected');
   const [ws, setWs] = useState(null);
   const [bleDevice, setBleDevice] = useState(null);
+  const [isFreehand, setIsFreehand] = useState(false);
+  const [touchPos, setTouchPos] = useState({ x: 50, y: 50 });
   const bleCharsRef = useRef([]);
   const isWritingRef = useRef(false);
+  const lastSentIntensity = useRef(0);
 
   // --- BLE Functions ---
   const sendCommand = async (mode, intensity) => {
@@ -212,6 +215,11 @@ function App() {
             sendCommand(activePatternRef.current, 255);
             setTimeout(() => sendCommand(activePatternRef.current, getIntensityValue(powerLevelRef.current)), 3000);
           }
+        } else if (msg.action === 'freehand') {
+          setTouchPos({ x: msg.value.x, y: msg.value.y });
+          if (role === 'bridge') {
+            sendCommand(activePatternRef.current, msg.value.intensity);
+          }
         }
       };
     }
@@ -238,6 +246,43 @@ function App() {
     updateRemote('climax', true);
     setShowClimaxOverlay(true);
     setTimeout(() => setShowClimaxOverlay(false), 4000);
+  };
+
+  const handleFreehandMove = (e) => {
+    if (!isFreehand) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const touch = e.touches ? e.touches[0] : e;
+    const x = ((touch.clientX - rect.left) / rect.width) * 100;
+    const y = ((touch.clientY - rect.top) / rect.height) * 100;
+
+    // Constrain to 0-100
+    const cx = Math.max(0, Math.min(100, x));
+    const cy = Math.max(0, Math.min(100, y));
+
+    setTouchPos({ x: cx, y: cy });
+
+    // Map Y to Intensity (Inverted: top is 255, bottom is 0)
+    const rawIntensity = Math.round((100 - cy) * 2.55);
+    const intensity = Math.max(0, Math.min(255, rawIntensity));
+
+    // Throttle BLE writes but keep logic smooth
+    if (Math.abs(intensity - lastSentIntensity.current) > 5 || intensity === 0) {
+      lastSentIntensity.current = intensity;
+
+      // Map to power segments for UI state feedback
+      let level = 0;
+      if (intensity > 200) level = 3;
+      else if (intensity > 120) level = 2;
+      else if (intensity > 20) level = 1;
+
+      setPowerLevel(level);
+      powerLevelRef.current = level;
+
+      if (role === 'bridge') {
+        sendCommand(activePatternRef.current, intensity);
+      }
+      updateRemote('freehand', { x: cx, y: cy, intensity });
+    }
   };
 
   const handleSendMessage = () => {
@@ -422,8 +467,34 @@ function App() {
 
             <div className="controls-container">
               <div className="visualizer-section">
-                <canvas ref={canvasRef} width="300" height="200" className="vibe-canvas" />
-                <div className="vibe-label">CYBER-PULSE FEEDBACK</div>
+                {isFreehand ? (
+                  <div
+                    className="freehand-pad"
+                    onMouseMove={handleFreehandMove}
+                    onTouchMove={handleFreehandMove}
+                    onMouseDown={() => playSound('select')}
+                  >
+                    <div
+                      className="touch-dot"
+                      style={{ left: `${touchPos.x}%`, top: `${touchPos.y}%` }}
+                    >
+                      <div className="dot-ripple" />
+                    </div>
+                    <canvas ref={canvasRef} width="300" height="250" className="vibe-canvas-free" />
+                    <div className="pad-label">DRAG TO VIBE</div>
+                  </div>
+                ) : (
+                  <>
+                    <canvas ref={canvasRef} width="300" height="200" className="vibe-canvas" />
+                    <div className="vibe-label">CYBER-PULSE FEEDBACK</div>
+                  </>
+                )}
+                <button
+                  className={`btn-toggle-freehand ${isFreehand ? 'active' : ''}`}
+                  onClick={() => { setIsFreehand(!isFreehand); playSound('select'); }}
+                >
+                  {isFreehand ? 'Switch to Grid' : 'Switch to Freehand'}
+                </button>
               </div>
 
               <div className="power-guard-section">
