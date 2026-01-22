@@ -6,7 +6,7 @@
 }
 
 body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: 'Inter', sans-serif;
   background: #0f172a;
   color: #f8fafc;
   min-height: 100vh;
@@ -18,7 +18,7 @@ body {
 
 #root {
   width: 100%;
-  max-width: 800px;
+  max-width: 900px;
 }
 
 .setup-container {
@@ -50,7 +50,6 @@ body {
   font-size: 18px;
   font-weight: 700;
   cursor: pointer;
-  background: #334155;
   color: white;
   transition: all 0.2s;
 }
@@ -63,13 +62,13 @@ body {
   background: #ec4899;
 }
 
-/* Main UI */
 .app {
   background: rgba(30, 41, 59, 0.8);
   backdrop-filter: blur(20px);
   border-radius: 24px;
   padding: 20px;
   border: 1px solid rgba(255, 255, 255, 0.1);
+  width: 100%;
 }
 
 header {
@@ -92,8 +91,7 @@ header {
   color: #10b981;
 }
 
-/* Controls */
-.controls-container {
+.immersive-container {
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -103,7 +101,6 @@ header {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 15px;
-  margin-bottom: 20px;
 }
 
 .video-container {
@@ -112,6 +109,7 @@ header {
   aspect-ratio: 16/9;
   overflow: hidden;
   position: relative;
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 video {
@@ -122,34 +120,84 @@ video {
 
 .video-label {
   position: absolute;
-  bottom: 10px;
-  left: 10px;
-  background: rgba(0, 0, 0, 0.5);
+  bottom: 8px;
+  left: 8px;
+  background: rgba(0, 0, 0, 0.6);
   padding: 2px 8px;
   border-radius: 4px;
   font-size: 10px;
+  font-weight: bold;
 }
 
-/* Vertical Slider */
+.btn-call {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 10px 20px;
+  background: #6366f1;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.control-row {
+  display: grid;
+  grid-template-columns: 1fr 1.5fr;
+  gap: 20px;
+  align-items: start;
+}
+
+.visualizer-section {
+  background: rgba(15, 23, 42, 0.6);
+  border-radius: 20px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 0 30px rgba(0, 0, 0, 0.5);
+}
+
+.vibe-canvas {
+  width: 100%;
+  max-width: 300px;
+  height: 150px;
+}
+
+.vibe-label {
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 2px;
+  color: #64748b;
+  margin-top: -10px;
+  margin-bottom: 5px;
+}
+
 .intensity-section {
   display: flex;
   flex-direction: column;
   align-items: center;
   background: rgba(15, 23, 42, 0.5);
-  padding: 20px;
+  padding: 15px;
   border-radius: 16px;
 }
 
 .vertical-slider-wrapper {
   display: flex;
   align-items: center;
-  gap: 20px;
-  height: 200px;
+  gap: 15px;
+  height: 180px;
 }
 
 .vertical-slider {
   -webkit-appearance: slider-vertical;
-  width: 40px;
+  appearance: slider-vertical;
+  width: 30px;
   height: 100%;
 }
 
@@ -158,70 +206,94 @@ video {
   flex-direction: column;
   justify-content: space-between;
   height: 100%;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: bold;
   color: #64748b;
 }
 
 .slider-labels span.active {
   color: #818cf8;
-  transform: scale(1.1);
 }
 
-/* Pattern Slider */
 .patterns-section {
   background: rgba(15, 23, 42, 0.5);
-  padding: 20px;
+  padding: 15px;
   border-radius: 16px;
-}
-
-.pattern-slider {
-  width: 100%;
-  margin: 15px 0;
-}
-
-.active-pattern-card {
   display: flex;
-  align-items: center;
-  gap: 15px;
-  background: #334155;
-  padding: 15px;
+  flex-direction: column;
+}
+
+.patterns-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 10px;
+  margin-top: 15px;
+}
+
+.pattern-btn {
+  background: #1e293b;
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 12px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  color: #94a3b8;
 }
 
-.pat-icon {
-  font-size: 32px;
+.pattern-btn.active {
+  background: #6366f1;
+  color: white;
+  border-color: #818cf8;
+  box-shadow: 0 0 15px rgba(99, 102, 241, 0.4);
+  transform: translateY(-2px);
 }
 
-.pat-name {
-  font-weight: 700;
-  color: #818cf8;
+.pattern-btn:hover:not(.active) {
+  background: #334155;
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
-.btn-stop-major {
+.p-icon {
+  font-size: 20px;
+}
+
+.p-name {
+  font-size: 10px;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.btn-stop-mini {
+  margin-top: 20px;
   width: 100%;
-  padding: 15px;
+  padding: 12px;
   background: #ef4444;
   color: white;
   border: none;
-  border-radius: 12px;
+  border-radius: 10px;
   font-weight: 900;
   cursor: pointer;
   box-shadow: 0 4px 0 #991b1b;
+  transition: all 0.1s;
 }
 
-.btn-stop-major:active {
+.btn-stop-mini:active {
   transform: translateY(2px);
   box-shadow: 0 2px 0 #991b1b;
 }
 
-/* Chat Section */
 .chat-section {
   background: rgba(15, 23, 42, 0.5);
   padding: 15px;
   border-radius: 16px;
   display: flex;
   flex-direction: column;
-  height: 200px;
+  height: 220px;
 }
 
 .messages {
@@ -229,6 +301,22 @@ video {
   overflow-y: auto;
   font-size: 13px;
   margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.msg {
+  padding: 8px 12px;
+  background: #334155;
+  border-radius: 8px;
+  align-self: flex-start;
+  max-width: 85%;
+}
+
+.msg.own {
+  background: #6366f1;
+  align-self: flex-end;
 }
 
 .chat-input {
@@ -236,7 +324,7 @@ video {
   gap: 8px;
 }
 
-input[type="text"] {
+.chat-input input {
   flex: 1;
   background: #1e293b;
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -245,8 +333,22 @@ input[type="text"] {
   color: white;
 }
 
+.chat-input button {
+  padding: 8px 16px;
+  background: #6366f1;
+  border: none;
+  border-radius: 8px;
+  color: white;
+  font-weight: bold;
+  cursor: pointer;
+}
+
 @media (max-width: 600px) {
   .media-section {
+    grid-template-columns: 1fr;
+  }
+
+  .control-row {
     grid-template-columns: 1fr;
   }
 }
