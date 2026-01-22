@@ -248,6 +248,38 @@ function App() {
     setInputText('');
   };
 
+  // --- Sound Engine ---
+  const playSound = (type) => {
+    try {
+      if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+      const ctx = audioCtxRef.current;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      const now = ctx.currentTime;
+      if (type === 'hover') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, now);
+        osc.frequency.exponentialRampToValueAtTime(440, now + 0.1);
+        gain.gain.setValueAtTime(0.05, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+        osc.start(now);
+        osc.stop(now + 0.1);
+      } else if (type === 'select') {
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(440, now);
+        osc.frequency.exponentialRampToValueAtTime(880, now + 0.15);
+        gain.gain.setValueAtTime(0.1, now);
+        gain.gain.linearRampToValueAtTime(0, now + 0.15);
+        osc.start(now);
+        osc.stop(now + 0.15);
+      }
+    } catch (e) { }
+  };
+
   // --- Realtime Visualizer Logic ---
   const animate = (time) => {
     const canvas = canvasRef.current;
@@ -394,35 +426,51 @@ function App() {
                 <div className="vibe-label">CYBER-PULSE FEEDBACK</div>
               </div>
 
-              <div className="control-row">
-                <div className="intensity-section">
-                  <h3>Power</h3>
-                  <div className="vertical-slider-wrapper">
-                    <input type="range" orient="vertical" min="0" max="3" step="1" value={powerLevel} onChange={(e) => handlePowerChange(e.target.value)} className="vertical-slider" />
-                    <div className="slider-labels">
-                      <span className={powerLevel === 3 ? 'active' : ''}>MAX</span>
-                      <span className={powerLevel === 2 ? 'active' : ''}>MED</span>
-                      <span className={powerLevel === 1 ? 'active' : ''}>LOW</span>
-                      <span className={powerLevel === 0 ? 'active' : ''}>OFF</span>
-                    </div>
-                  </div>
-                  <button onClick={() => handlePowerChange(0)} className="btn-stop-mini">STOP</button>
-                </div>
+              <div className="power-guard-section">
+                <button
+                  className={`p-guard-btn off ${powerLevel === 0 ? 'active' : ''}`}
+                  onClick={() => { handlePowerChange(0); playSound('select'); }}
+                  onMouseEnter={() => playSound('hover')}
+                >
+                  OFF
+                </button>
+                <button
+                  className={`p-guard-btn low ${powerLevel === 1 ? 'active' : ''}`}
+                  onClick={() => { handlePowerChange(1); playSound('select'); }}
+                  onMouseEnter={() => playSound('hover')}
+                >
+                  LOW
+                </button>
+                <button
+                  className={`p-guard-btn med ${powerLevel === 2 ? 'active' : ''}`}
+                  onClick={() => { handlePowerChange(2); playSound('select'); }}
+                  onMouseEnter={() => playSound('hover')}
+                >
+                  MED
+                </button>
+                <button
+                  className={`p-guard-btn max ${powerLevel === 3 ? 'active' : ''}`}
+                  onClick={() => { handlePowerChange(3); playSound('select'); }}
+                  onMouseEnter={() => playSound('hover')}
+                >
+                  MAX
+                </button>
+              </div>
 
-                <div className="patterns-section">
-                  <h3>Vibration Patterns</h3>
-                  <div className="patterns-grid">
-                    {PATTERNS.map(p => (
-                      <button
-                        key={p.id}
-                        className={`pattern-btn ${activePattern === p.id ? 'active' : ''}`}
-                        onClick={() => handlePatternChange(p.id)}
-                      >
-                        <span className="p-icon">{p.icon}</span>
-                        <span className="p-name">{p.name}</span>
-                      </button>
-                    ))}
-                  </div>
+              <div className="patterns-section">
+                <h3>Vibration Patterns</h3>
+                <div className="patterns-grid">
+                  {PATTERNS.map(p => (
+                    <button
+                      key={p.id}
+                      className={`pattern-btn ${activePattern === p.id ? 'active' : ''}`}
+                      onClick={() => { handlePatternChange(p.id); playSound('select'); }}
+                      onMouseEnter={() => playSound('hover')}
+                    >
+                      <span className="p-icon">{p.icon}</span>
+                      <span className="p-name">{p.name}</span>
+                    </button>
+                  ))}
                 </div>
               </div>
 
