@@ -13,7 +13,9 @@ function App() {
   const [role, setRole] = useState(null);
   const [deviceId, setDeviceId] = useState('trueform-1');
   const [passcode, setPasscode] = useState('');
-  const [isAuthorized, setIsAuthorized] = useState(false);
+  const [isAuthorized, setIsAuthorized] = useState(() => {
+    return sessionStorage.getItem('tf_auth') === 'true';
+  });
   const [connected, setConnected] = useState(false);
 
   // Type 'n' Talk State
@@ -298,29 +300,34 @@ function App() {
     try {
       if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
       const ctx = audioCtxRef.current;
-      const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-
-      osc.connect(gain);
-      gain.connect(ctx.destination);
 
       const now = ctx.currentTime;
       if (type === 'hover') {
+        const osc = ctx.createOscillator();
         osc.type = 'sine';
-        osc.frequency.setValueAtTime(880, now);
-        osc.frequency.exponentialRampToValueAtTime(440, now + 0.1);
-        gain.gain.setValueAtTime(0.05, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+        osc.frequency.setValueAtTime(660, now);
+        osc.frequency.exponentialRampToValueAtTime(880, now + 0.05);
+        gain.gain.setValueAtTime(0.02, now);
+        gain.gain.linearRampToValueAtTime(0, now + 0.05);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
         osc.start(now);
-        osc.stop(now + 0.1);
+        osc.stop(now + 0.05);
       } else if (type === 'select') {
-        osc.type = 'square';
-        osc.frequency.setValueAtTime(440, now);
-        osc.frequency.exponentialRampToValueAtTime(880, now + 0.15);
-        gain.gain.setValueAtTime(0.1, now);
-        gain.gain.linearRampToValueAtTime(0, now + 0.15);
-        osc.start(now);
-        osc.stop(now + 0.15);
+        const osc1 = ctx.createOscillator();
+        const osc2 = ctx.createOscillator();
+        osc1.frequency.setValueAtTime(440, now);
+        osc2.frequency.setValueAtTime(880, now);
+        gain.gain.setValueAtTime(0.04, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+        osc1.connect(gain);
+        osc2.connect(gain);
+        gain.connect(ctx.destination);
+        osc1.start(now);
+        osc2.start(now);
+        osc1.stop(now + 0.2);
+        osc2.stop(now + 0.2);
       }
     } catch (e) { }
   };
@@ -405,7 +412,15 @@ function App() {
             className="device-input"
           />
           <button
-            onClick={() => passcode === '6969' ? setIsAuthorized(true) : alert('Wrong Passcode')}
+            onClick={() => {
+              if (passcode === '6969') {
+                setIsAuthorized(true);
+                sessionStorage.setItem('tf_auth', 'true');
+                playSound('select');
+              } else {
+                alert('Wrong Passcode');
+              }
+            }}
             className="btn-connect"
           >
             Authorize Access
@@ -436,7 +451,10 @@ function App() {
       <header>
         <h1>{role === 'bridge' ? '🔗 Bridge' : '🎮 Controller'}</h1>
         <div className={`status ${connected ? 'connected' : ''}`}>{status}</div>
-        <button onClick={() => setRole(null)} className="btn-reset">Reset</button>
+        <div className="header-actions">
+          <button onClick={() => { sessionStorage.removeItem('tf_auth'); setIsAuthorized(false); }} title="Lock Site" className="btn-icon">🔒</button>
+          <button onClick={() => setRole(null)} className="btn-reset">Reset</button>
+        </div>
       </header>
 
       <main>
