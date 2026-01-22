@@ -7,11 +7,18 @@ const path = require('path');
 const app = express();
 app.use(cors());
 
-// Simple health check endpoint
-app.get('/', (req, res) => {
-    res.send('TrueForm Bridge WebSocket Server Running');
-});
-
+// In production, serve the built React app
+if (process.env.NODE_ENV === 'production') {
+    app.use(express.static(path.join(__dirname, '../web/dist')));
+    app.get('*', (req, res) => {
+        res.sendFile(path.join(__dirname, '../web/dist/index.html'));
+    });
+} else {
+    // In development, just show health check
+    app.get('/', (req, res) => {
+        res.send('TrueForm Bridge WebSocket Server Running');
+    });
+}
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
