@@ -43,24 +43,45 @@ function App() {
 
     // JoyHub protocol: Scale 0-100 to 0-255
     const intensity = Math.min(255, Math.floor((rawValue / 100) * 255));
-
-    // JoyHub protocol format (protocol index 1):
-    // For vibration on index 0: [0xff, 0x04, 0x01, motor_index, intensity]
-    // motor_index: 0 for primary vibrator
     const motorIndex = 0; // TrueForm3 has vibrate at index 0
-    const cmd = new Uint8Array([0xff, 0x04, 0x01, motorIndex, intensity]);
 
-    addLog(`Sending JoyHub: vibe=${intensity} (${rawValue}%)`);
+    // Try multiple JoyHub protocol variants
+    const commands = [
+      // Protocol version 1 (default from config)
+      new Uint8Array([0xff, 0x04, 0x01, motorIndex, intensity]),
 
-    try {
-      // Send to the TX characteristic
-      if (bleChars.length > 0) {
-        await bleChars[0].writeValueWithResponse(cmd);
-        addLog(`✓ Command sent successfully`);
+      // Protocol version 0 (some devices use this)
+      new Uint8Array([0xff, 0x04, 0x00, motorIndex, intensity]),
+
+      // Alternative: Without motor index
+      new Uint8Array([0xff, 0x03, 0x01, intensity]),
+
+      // Alternative: Lovense-style for JoyHub
+      new TextEncoder().encode(`Vibrate:${rawValue};`),
+
+      // Simple intensity only
+      new Uint8Array([intensity]),
+    ];
+
+    addLog(`🔧 Testing ${commands.length} variants at ${rawValue}%...`);
+
+    for (let i = 0; i < commands.length; i++) {
+      try {
+        // Try writeWithoutResponse first (many devices prefer this)
+        if (bleChars[0].properties.writeWithoutResponse) {
+          await bleChars[0].writeValue(commands[i]);
+        } else {
+          await bleChars[0].writeValueWithResponse(commands[i]);
+        }
+        addLog(`✓ Variant ${i + 1}: [${Array.from(commands[i]).map(b => '0x' + b.toString(16).padStart(2, '0')).join(', ')}]`);
+        // Longer delay to prevent GATT conflicts
+        await new Promise(r => setTimeout(r, 300));
+      } catch (err) {
+        addLog(`✗ Variant ${i + 1}: ${err.message}`);
+        await new Promise(r => setTimeout(r, 200));
       }
-    } catch (err) {
-      addLog(`✗ Write failed: ${err.message}`);
     }
+    addLog(`⏸️  Test complete - watch for vibration!`);
   };
 
 
