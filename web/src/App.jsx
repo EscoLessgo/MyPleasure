@@ -23,6 +23,9 @@ function App() {
   const [bleChars, setBleChars] = useState([]);
   const [log, setLog] = useState([]);
 
+  // Use ref to hold BLE chars so WebSocket handler always has latest value
+  const bleCharsRef = useRef([]);
+
   const addLog = (msg) => {
     setLog(prev => [msg, ...prev].slice(0, 10));
     console.log(`[LOG]: ${msg}`);
@@ -39,7 +42,12 @@ function App() {
   }, []);
 
   const sendVibeCommand = async (rawValue) => {
-    if (!bleChars.length) return;
+    addLog(`🔵 sendVibeCommand called with ${rawValue}%`);
+
+    if (!bleCharsRef.current.length) {
+      addLog(`❌ No BLE connection! bleCharsRef.current.length = ${bleCharsRef.current.length}`);
+      return;
+    }
 
     // TrueForm3 Protocol: [0xa0, 0x0c, 0x00, 0x00, mode, intensity]
     // Mode 0x01 = Constant vibration (direct intensity control)
@@ -49,7 +57,8 @@ function App() {
     const cmd = new Uint8Array([0xa0, 0x0c, 0x00, 0x00, mode, intensity]);
 
     try {
-      await bleChars[0].writeValue(cmd);
+      addLog(`📡 Sending BLE command...`);
+      await bleCharsRef.current[0].writeValue(cmd);
       addLog(`✓ Vibration set to ${rawValue}% (0x${intensity.toString(16)})`);
     } catch (err) {
       addLog(`✗ Command failed: ${err.message}`);
@@ -92,50 +101,60 @@ function App() {
 
   const connectBLE = async () => {
     try {
-      addLog('Scanning for J-TrueForm3...');
+      addLog('🔍 Step 1: Scanning for J-TrueForm3...');
       setStatus('Scanning...');
       const device = await navigator.bluetooth.requestDevice({
         filters: [{ name: 'J-TrueForm3' }, { namePrefix: 'J-' }],
         optionalServices: [JOYHUB_SERVICE_UUID]
       });
+      addLog(`✓ Step 1: Found device: ${device.name}`);
 
       const onDisconnect = () => {
-        addLog('BLE Hardware Disconnected');
+        addLog('❌ BLE Hardware Disconnected');
         setStatus('Disconnected');
         setBleDevice(null);
         setBleChars([]);
+        bleCharsRef.current = []; // Also clear ref!
       };
       device.addEventListener('gattserverdisconnected', onDisconnect);
 
-      addLog('Connecting to GATT Server...');
+      addLog('🔌 Step 2: Connecting to GATT Server...');
       let server = await device.gatt.connect();
 
       // Retry logic if not connected
       if (!server.connected) {
-        addLog('Retrying GATT Connect...');
+        addLog('⚠️  Not connected, retrying...');
         server = await device.gatt.connect();
       }
+      addLog(`✓ Step 2: GATT connected = ${server.connected}`);
 
-      addLog('Getting JoyHub Service...');
+      addLog('🔧 Step 3: Getting JoyHub Service...');
       const service = await server.getPrimaryService(JOYHUB_SERVICE_UUID);
+      addLog(`✓ Step 3: Got service ${service.uuid}`);
 
-      addLog('Getting TX Characteristic...');
+      addLog('📡 Step 4: Getting TX Characteristic...');
       const txChar = await service.getCharacteristic(JOYHUB_TX_CHAR_UUID);
+      addLog(`✓ Step 4: Got TX char ${txChar.uuid}`);
 
       if (!txChar.properties.writeWithResponse && !txChar.properties.writeWithoutResponse) {
         throw new Error('TX characteristic is not writable');
       }
+      addLog(`✓ TX is writable (writeWithoutResponse: ${txChar.properties.writeWithoutResponse})`);
 
-      addLog(`✓ JoyHub Connected! Ready to send commands.`);
+      addLog(`✅ Step 5: Saving to state...`);
       setBleChars([txChar]);
+      bleCharsRef.current = [txChar]; // Also update ref for WebSocket handler!
       setBleDevice(device);
       setStatus('Hardware Ready');
+      addLog(`✓ Step 5: bleChars set, bleCharsRef.current.length = 1`);
+
+      addLog(`🎉 CONNECTION COMPLETE! Ready to send commands.`);
 
       if (ws) {
         ws.send(JSON.stringify({ action: 'status', value: 'Bridge Online & Connected' }));
       }
     } catch (err) {
-      addLog(`BLE Error: ${err.message}`);
+      addLog(`❌ BLE Error at some step: ${err.message}`);
       setStatus('BLE Failed');
     }
   };
