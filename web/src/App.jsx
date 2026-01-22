@@ -7,9 +7,10 @@ const host = window.location.host.includes('5173')
   ? 'localhost:8080'
   : window.location.host;
 const WS_URL = `${protocol}//${host}`;
-const BLE_SERVICE_UUID = 0xffa0; // Main service from logs
-const VIBE_SERVICE_UUID = '5833ff01-9b8b-5191-6142-22a4536ef123'; // Specific long service from logs
-const FITNESS_SERVICE = 0x1814;
+
+// JoyHub Protocol Configuration (from Buttplug device-config-v4)
+const JOYHUB_SERVICE_UUID = '0000ffa0-0000-1000-8000-00805f9b34fb';
+const JOYHUB_TX_CHAR_UUID = '0000ffa1-0000-1000-8000-00805f9b34fb';
 
 function App() {
   const [role, setRole] = useState(null); // 'controller' or 'bridge'
@@ -39,30 +40,29 @@ function App() {
 
   const sendVibeCommand = async (rawValue) => {
     if (!bleChars.length) return;
-    const s = Math.min(255, Math.floor((rawValue / 100) * 255));
 
-    // Shotgun approach: Try text and hex patterns
-    const cmds = [
-      new Uint8Array([s]),                                // Raw Byte
-      new TextEncoder().encode(`Vibrate:${rawValue};`),   // Lovense/Text style
-      new Uint8Array([0x01, 0x01, s]),                    // Hismith/Standard
-      new Uint8Array([0x0F, 0x03, 0x00, s, s]),           // Generic Massage
-      new Uint8Array([0x55, 0x04, 0x03, 0x00, s, s ^ 0x01]), // Checksum style
-    ];
+    // JoyHub protocol: Scale 0-100 to 0-255
+    const intensity = Math.min(255, Math.floor((rawValue / 100) * 255));
 
-    addLog(`Sending Precision Shotgun...`);
-    for (const char of bleChars) {
-      for (const cmd of cmds) {
-        try {
-          // Use writeValueWithResponse for reliability since we had disconnects
-          await char.writeValue(cmd);
-          // Wait 200ms between patterns to prevent hardware crash
-          await new Promise(r => setTimeout(r, 200));
-        } catch (e) { }
+    // JoyHub protocol format (protocol index 1):
+    // For vibration on index 0: [0xff, 0x04, 0x01, motor_index, intensity]
+    // motor_index: 0 for primary vibrator
+    const motorIndex = 0; // TrueForm3 has vibrate at index 0
+    const cmd = new Uint8Array([0xff, 0x04, 0x01, motorIndex, intensity]);
+
+    addLog(`Sending JoyHub: vibe=${intensity} (${rawValue}%)`);
+
+    try {
+      // Send to the TX characteristic
+      if (bleChars.length > 0) {
+        await bleChars[0].writeValueWithResponse(cmd);
+        addLog(`✓ Command sent successfully`);
       }
+    } catch (err) {
+      addLog(`✗ Write failed: ${err.message}`);
     }
-    addLog(`Shotgun Sequence Finished`);
   };
+
 
   const connectWS = () => {
     if (ws) ws.close();
@@ -100,7 +100,7 @@ function App() {
       setStatus('Scanning...');
       const device = await navigator.bluetooth.requestDevice({
         filters: [{ name: 'J-TrueForm3' }, { namePrefix: 'J-' }],
-        optionalServices: [VIBE_SERVICE_UUID, BLE_SERVICE_UUID, FITNESS_SERVICE]
+        optionalServices: [JOYHUB_SERVICE_UUID]
       });
 
       const onDisconnect = () => {
@@ -120,25 +120,18 @@ function App() {
         server = await device.gatt.connect();
       }
 
-      addLog('Discovering Services...');
-      const services = await server.getPrimaryServices();
-      addLog(`Services: ${services.map(s => s.uuid.substring(0, 4)).join(', ')}`);
+      addLog('Getting JoyHub Service...');
+      const service = await server.getPrimaryService(JOYHUB_SERVICE_UUID);
 
-      // Try specialized vibe service first
-      let service = services.find(s => s.uuid.toLowerCase().includes('5833ff01')) ||
-        services.find(s => s.uuid.toLowerCase().includes('ffa0')) ||
-        services[0];
+      addLog('Getting TX Characteristic...');
+      const txChar = await service.getCharacteristic(JOYHUB_TX_CHAR_UUID);
 
-      if (!service) throw new Error('No compatible services found');
+      if (!txChar.properties.writeWithResponse && !txChar.properties.writeWithoutResponse) {
+        throw new Error('TX characteristic is not writable');
+      }
 
-      addLog(`Using service: ${service.uuid.substring(0, 8)}`);
-      const chars = await service.getCharacteristics();
-      const writableChars = chars.filter(c => c.properties.write || c.properties.writeWithoutResponse);
-
-      if (writableChars.length === 0) throw new Error('No writable characteristics found');
-
-      addLog(`Ready! Linked ${writableChars.length} channels`);
-      setBleChars(writableChars);
+      addLog(`✓ JoyHub Connected! Ready to send commands.`);
+      setBleChars([txChar]);
       setBleDevice(device);
       setStatus('Hardware Ready');
 
