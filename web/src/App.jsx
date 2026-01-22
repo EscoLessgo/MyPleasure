@@ -256,24 +256,23 @@ function App() {
           setTimeout(() => setLastReaction(null), 2000);
         } else if (msg.action === 'climax') {
           setShowClimaxOverlay(true);
-          setTimeout(() => setShowClimaxOverlay(false), 4000);
+          setTimeout(() => setShowClimaxOverlay(false), 3000);
           if (role === 'bridge') {
-            // Ultimate pulse on climax
-            sendCommand(activePatternRef.current, 255);
-            setTimeout(() => sendCommand(activePatternRef.current, getIntensityValue(powerLevelRef.current)), 3000);
+            sendCommand(1, 255);
+            setTimeout(() => sendCommand(activePatternRef.current, getIntensityValue(powerLevelRef.current)), 2000);
           }
         } else if (msg.action === 'freehand') {
           setTouchPos({ x: msg.value.x, y: msg.value.y });
+          setIsFreehand(true); // Automatically switch to freehand view on remote move
           if (role === 'bridge') {
-            // Force Mode 1 (Steady) for Freehand for absolute speed control
-            sendCommand(1, msg.value.intensity);
+            sendCommand(msg.value.stage || 1, msg.value.intensity);
           }
         } else if (msg.action === 'audio-vibe') {
           if (role === 'bridge') sendCommand(1, msg.value);
         }
       };
     }
-  }, [ws, role]);
+  }, [ws, role, isFreehand]);
 
   const handleTyping = (text) => {
     setInputText(text);
@@ -312,7 +311,6 @@ function App() {
     setTouchPos({ x: cx, y: cy });
 
     // For stage-based devices, we map the Y-axis to the 3 physical speed modes
-    // Top is MAX (Stage 3), Bottom is LOW (Stage 1)
     let stage = 1;
     let intensity = 255;
 
@@ -320,14 +318,14 @@ function App() {
     if (invertedY > 66) stage = 3;
     else if (invertedY > 33) stage = 2;
     else if (invertedY > 5) stage = 1;
-    else { stage = 0; intensity = 0; } // Near bottom is stop
+    else { stage = 0; intensity = 0; }
 
-    if (stage !== activePatternRef.current || (stage === 0 && lastSentIntensity.current !== 0)) {
+    if (Math.abs(intensity - lastSentIntensity.current) > 2 || stage !== activePatternRef.current) {
+      lastSentIntensity.current = intensity;
       setActivePattern(stage || 1);
       activePatternRef.current = stage || 1;
       setPowerLevel(stage);
       powerLevelRef.current = stage;
-      lastSentIntensity.current = intensity;
 
       if (role === 'bridge') {
         sendCommand(stage, intensity);
@@ -532,26 +530,30 @@ function App() {
               </div>
             </div>
 
+            <div className="talk-suite-bar">
+              <button
+                className={`btn-talk ${isMicSync ? 'active' : ''}`}
+                onClick={() => { toggleMicSync(); playSound('select'); }}
+              >
+                {isMicSync ? '🎤 MIC SYNC ON' : '🎤 ENABLE MIC SYNC'}
+              </button>
+              <div className="reaction-tags">
+                <button onClick={() => { handleReaction('up'); playSound('select'); }} title="Fire" className="btn-tag">🔥</button>
+                <button onClick={() => { handleReaction('down'); playSound('select'); }} title="Freeze" className="btn-tag">🧊</button>
+                <button onClick={() => { handleClimax(); playSound('select'); }} className="btn-climax-mini">CUUUUM!</button>
+              </div>
+            </div>
+
             <div className="controls-container">
               <div className="visualizer-section">
                 <div className="visualizer-header">
                   <div className="vibe-label">CYBER-PULSE FEEDBACK</div>
-                  <div className="visualizer-actions-mini">
-                    <button
-                      className={`btn-action-mini ${isFreehand ? 'active' : ''}`}
-                      onClick={() => { setIsFreehand(!isFreehand); playSound('select'); }}
-                      title="Toggle Freehand Pad"
-                    >
-                      {isFreehand ? '📱 Grid' : '🎯 Freehand'}
-                    </button>
-                    <button
-                      className={`btn-action-mini ${isMicSync ? 'active' : ''}`}
-                      onClick={() => { toggleMicSync(); playSound('select'); }}
-                      title="Sync to Voice"
-                    >
-                      {isMicSync ? '🎤 ON' : '🎤 OFF'}
-                    </button>
-                  </div>
+                  <button
+                    className={`btn-mode-toggle ${isFreehand ? 'freehand' : 'grid'}`}
+                    onClick={() => { setIsFreehand(!isFreehand); playSound('select'); }}
+                  >
+                    {isFreehand ? 'SWITCH TO GRID' : 'SWITCH TO FREEHAND'}
+                  </button>
                 </div>
 
                 {isFreehand ? (
@@ -559,7 +561,6 @@ function App() {
                     className="freehand-pad"
                     onMouseMove={handleFreehandMove}
                     onTouchMove={handleFreehandMove}
-                    onMouseDown={() => playSound('select')}
                   >
                     <div
                       className="touch-dot"
@@ -568,7 +569,7 @@ function App() {
                       <div className="dot-ripple" />
                     </div>
                     <canvas ref={canvasRef} width="300" height="250" className="vibe-canvas-free" />
-                    <div className="pad-label">DRAG TO VIBE</div>
+                    <div className="pad-label">DRAG TO CONTROL SPEED</div>
                   </div>
                 ) : (
                   <div className="canvas-container">
@@ -577,99 +578,85 @@ function App() {
                 )}
               </div>
 
-              <div className="power-guard-section">
-                <button
-                  className={`p-guard-btn off ${powerLevel === 0 ? 'active' : ''}`}
-                  onClick={() => { handlePowerChange(0); playSound('select'); }}
-                  onMouseEnter={() => playSound('hover')}
-                >
-                  OFF
-                </button>
-                <button
-                  className={`p-guard-btn low ${powerLevel === 1 ? 'active' : ''}`}
-                  onClick={() => { handlePowerChange(1); playSound('select'); }}
-                  onMouseEnter={() => playSound('hover')}
-                >
-                  LOW
-                </button>
-                <button
-                  className={`p-guard-btn med ${powerLevel === 2 ? 'active' : ''}`}
-                  onClick={() => { handlePowerChange(2); playSound('select'); }}
-                  onMouseEnter={() => playSound('hover')}
-                >
-                  MED
-                </button>
-                <button
-                  className={`p-guard-btn max ${powerLevel === 3 ? 'active' : ''}`}
-                  onClick={() => { handlePowerChange(3); playSound('select'); }}
-                  onMouseEnter={() => playSound('hover')}
-                >
-                  MAX
-                </button>
-              </div>
-
-              <div className="patterns-section">
-                <h3>Vibration Patterns</h3>
-                <div className="patterns-grid">
-                  {PATTERNS.map(p => (
+              {!isFreehand && (
+                <>
+                  <div className="power-guard-section">
                     <button
-                      key={p.id}
-                      className={`pattern-btn ${activePattern === p.id ? 'active' : ''}`}
-                      onClick={() => { handlePatternChange(p.id); playSound('select'); }}
-                      onMouseEnter={() => playSound('hover')}
+                      className={`p-guard-btn off ${powerLevel === 0 ? 'active' : ''}`}
+                      onClick={() => { handlePowerChange(0); playSound('select'); }}
                     >
-                      <span className="p-icon">{p.icon}</span>
-                      <span className="p-name">{p.name}</span>
+                      OFF
                     </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="chat-section">
-                <div className="chat-header">
-                  <div className="typing-indicator">
-                    {remoteIsTyping && <span className="typing-dot">Remote is typing...</span>}
+                    <button
+                      className={`p-guard-btn low ${powerLevel === 1 ? 'active' : ''}`}
+                      onClick={() => { handlePowerChange(1); playSound('select'); }}
+                    >
+                      LOW
+                    </button>
+                    <button
+                      className={`p-guard-btn med ${powerLevel === 2 ? 'active' : ''}`}
+                      onClick={() => { handlePowerChange(2); playSound('select'); }}
+                    >
+                      MED
+                    </button>
+                    <button
+                      className={`p-guard-btn max ${powerLevel === 3 ? 'active' : ''}`}
+                      onClick={() => { handlePowerChange(3); playSound('select'); }}
+                    >
+                      MAX
+                    </button>
                   </div>
-                  <div className="reaction-bar">
-                    <button onClick={() => handleReaction('up')} className="btn-tag">👍</button>
-                    <button onClick={() => handleReaction('down')} className="btn-tag">👎</button>
+
+                  <div className="patterns-section">
+                    <div className="patterns-grid">
+                      {PATTERNS.map(p => (
+                        <button
+                          key={p.id}
+                          className={`pattern-btn ${activePattern === p.id ? 'active' : ''}`}
+                          onClick={() => { handlePatternChange(p.id); playSound('select'); }}
+                        >
+                          <span className="p-icon">{p.icon}</span>
+                          <span className="p-name">{p.name}</span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
-
-                <div className="messages">
-                  {lastReaction && (
-                    <div className="reaction-overlay animate-pop">
-                      {lastReaction === 'up' ? '💖' : '💢'}
-                    </div>
-                  )}
-                  {messages.map((m, i) => (
-                    <div key={i} className={`msg ${m.user === role ? 'own' : ''}`}>
-                      <b>{m.user}:</b> {m.text}
-                    </div>
-                  ))}
-                </div>
-
-                <div className="climax-container">
-                  <button onClick={handleClimax} className="btn-climax">I'm Gonna CUUUUM !</button>
-                </div>
-
-                <div className="chat-input">
-                  <input
-                    value={inputText}
-                    onChange={(e) => handleTyping(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                    placeholder="Type to talk..."
-                  />
-                  <button onClick={handleSendMessage}>Send</button>
-                </div>
-              </div>
-
-              {showClimaxOverlay && (
-                <div className="climax-fullscreen-overlay">
-                  <div className="climax-text">🌊 I'M GONNA CUUUUM !! 🌊</div>
-                </div>
+                </>
               )}
             </div>
+
+            <div className="chat-section">
+              <div className="typing-indicator">
+                {remoteIsTyping && <span className="typing-dot">Remote is typing...</span>}
+              </div>
+              <div className="messages">
+                {lastReaction && (
+                  <div className="reaction-overlay animate-pop">
+                    {lastReaction === 'up' ? '�' : '🧊'}
+                  </div>
+                )}
+                {messages.map((m, i) => (
+                  <div key={i} className={`msg ${m.user === role ? 'own' : ''}`}>
+                    <b>{m.user}:</b> {m.text}
+                  </div>
+                ))}
+              </div>
+
+              <div className="chat-input">
+                <input
+                  value={inputText}
+                  onChange={(e) => handleTyping(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+                  placeholder="Type to talk..."
+                />
+              </div>
+            </div>
+
+            {showClimaxOverlay && (
+              <div className="climax-toast">
+                🌊 <span className="toast-text">I'M GONNA CUUUUM !!</span> 🌊
+              </div>
+            )}
 
             <div className="audio-visualizer-dock">
               <canvas ref={audioCanvasRef} width="600" height="40" className="audio-wave-canvas" />
