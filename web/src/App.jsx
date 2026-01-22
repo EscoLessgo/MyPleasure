@@ -12,7 +12,16 @@ const JOYHUB_TX_CHAR_UUID = '0000ffa1-0000-1000-8000-00805f9b34fb';
 function App() {
   const [role, setRole] = useState(null);
   const [deviceId, setDeviceId] = useState('trueform-1');
+  const [passcode, setPasscode] = useState('');
+  const [isAuthorized, setIsAuthorized] = useState(false);
   const [connected, setConnected] = useState(false);
+
+  // Type 'n' Talk State
+  const [isTyping, setIsTyping] = useState(false);
+  const [remoteIsTyping, setRemoteIsTyping] = useState(false);
+  const [lastReaction, setLastReaction] = useState(null);
+  const [showClimaxOverlay, setShowClimaxOverlay] = useState(false);
+  const typingTimeoutRef = useRef(null);
 
   // Remote Control State & Refs for stable WS access
   const [powerLevel, setPowerLevel] = useState(0);
@@ -28,7 +37,10 @@ function App() {
   const remoteVideoRef = useRef(null);
   const peerConnection = useRef(null);
   const canvasRef = useRef(null);
+  const audioCanvasRef = useRef(null);
   const requestRef = useRef();
+  const audioCtxRef = useRef(null);
+  const analystRef = useRef(null);
 
   const [status, setStatus] = useState('Disconnected');
   const [ws, setWs] = useState(null);
@@ -76,8 +88,10 @@ function App() {
       stream.getTracks().forEach(track => peerConnection.current.addTrack(track, stream));
 
       peerConnection.current.ontrack = (event) => {
-        setRemoteStream(event.streams[0]);
-        if (remoteVideoRef.current) remoteVideoRef.current.srcObject = event.streams[0];
+        const stream = event.streams[0];
+        setRemoteStream(stream);
+        if (remoteVideoRef.current) remoteVideoRef.current.srcObject = stream;
+        setupAudioVisualizer(stream);
       };
 
       peerConnection.current.onicecandidate = (event) => {
@@ -88,6 +102,40 @@ function App() {
     } catch (err) {
       console.error('Media fail:', err);
     }
+  };
+
+  const setupAudioVisualizer = (stream) => {
+    if (!audioCanvasRef.current) return;
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const source = audioCtx.createMediaStreamSource(stream);
+    const analyzer = audioCtx.createAnalyser();
+    analyzer.fftSize = 256;
+    source.connect(analyzer);
+    audioCtxRef.current = audioCtx;
+    analystRef.current = analyzer;
+    drawAudioWave();
+  };
+
+  const drawAudioWave = () => {
+    if (!analystRef.current || !audioCanvasRef.current) return;
+    const canvas = audioCanvasRef.current;
+    const ctx = canvas.getContext('2d');
+    const dataArray = new Uint8Array(analystRef.current.frequencyBinCount);
+
+    const render = () => {
+      analystRef.current.getByteFrequencyData(dataArray);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const barWidth = (canvas.width / dataArray.length) * 2.5;
+      let x = 0;
+      for (let i = 0; i < dataArray.length; i++) {
+        const barHeight = dataArray[i] / 2;
+        ctx.fillStyle = `rgb(99, 102, 241)`;
+        ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+        x += barWidth + 1;
+      }
+      requestAnimationFrame(render);
+    };
+    render();
   };
 
   const createOffer = async () => {
@@ -149,9 +197,48 @@ function App() {
             await peerConnection.current.addIceCandidate(new RTCIceCandidate(msg.candidate));
           } catch (e) { }
         }
+
+        // Handle Type 'n' Talk Features
+        if (msg.action === 'typing') {
+          setRemoteIsTyping(msg.value);
+        } else if (msg.action === 'reaction') {
+          setLastReaction(msg.value);
+          setTimeout(() => setLastReaction(null), 2000);
+        } else if (msg.action === 'climax') {
+          setShowClimaxOverlay(true);
+          setTimeout(() => setShowClimaxOverlay(false), 4000);
+          if (role === 'bridge') {
+            // Ultimate pulse on climax
+            sendCommand(activePatternRef.current, 255);
+            setTimeout(() => sendCommand(activePatternRef.current, getIntensityValue(powerLevelRef.current)), 3000);
+          }
+        }
       };
     }
   }, [ws, role]);
+
+  const handleTyping = (text) => {
+    setInputText(text);
+    if (!isTyping) {
+      setIsTyping(true);
+      updateRemote('typing', true);
+    }
+    clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => {
+      setIsTyping(false);
+      updateRemote('typing', false);
+    }, 2000);
+  };
+
+  const handleReaction = (type) => {
+    updateRemote('reaction', type);
+  };
+
+  const handleClimax = () => {
+    updateRemote('climax', true);
+    setShowClimaxOverlay(true);
+    setTimeout(() => setShowClimaxOverlay(false), 4000);
+  };
 
   const handleSendMessage = () => {
     if (!inputText.trim()) return;
@@ -226,6 +313,30 @@ function App() {
       if (ws) ws.send(JSON.stringify({ action: 'status', value: 'Bridge Connected' }));
     } catch (err) { console.error(err); }
   };
+
+  if (!isAuthorized) {
+    return (
+      <div className="setup-container">
+        <div className="logo">🛡️ Secure Bridge</div>
+        <div className="passcode-gate">
+          <p>Enter Session Passcode</p>
+          <input
+            type="password"
+            placeholder="****"
+            value={passcode}
+            onChange={(e) => setPasscode(e.target.value)}
+            className="device-input"
+          />
+          <button
+            onClick={() => passcode === '6969' ? setIsAuthorized(true) : alert('Wrong Passcode')}
+            className="btn-connect"
+          >
+            Authorize Access
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (!role) {
     return (
@@ -316,18 +427,54 @@ function App() {
               </div>
 
               <div className="chat-section">
+                <div className="chat-header">
+                  <div className="typing-indicator">
+                    {remoteIsTyping && <span className="typing-dot">Remote is typing...</span>}
+                  </div>
+                  <div className="reaction-bar">
+                    <button onClick={() => handleReaction('up')} className="btn-tag">👍</button>
+                    <button onClick={() => handleReaction('down')} className="btn-tag">👎</button>
+                  </div>
+                </div>
+
                 <div className="messages">
+                  {lastReaction && (
+                    <div className="reaction-overlay animate-pop">
+                      {lastReaction === 'up' ? '💖' : '💢'}
+                    </div>
+                  )}
                   {messages.map((m, i) => (
                     <div key={i} className={`msg ${m.user === role ? 'own' : ''}`}>
                       <b>{m.user}:</b> {m.text}
                     </div>
                   ))}
                 </div>
+
+                <div className="climax-container">
+                  <button onClick={handleClimax} className="btn-climax">I'm Gonna CUUUUM !</button>
+                </div>
+
                 <div className="chat-input">
-                  <input value={inputText} onChange={(e) => setInputText(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()} />
+                  <input
+                    value={inputText}
+                    onChange={(e) => handleTyping(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+                    placeholder="Type to talk..."
+                  />
                   <button onClick={handleSendMessage}>Send</button>
                 </div>
               </div>
+
+              {showClimaxOverlay && (
+                <div className="climax-fullscreen-overlay">
+                  <div className="climax-text">🌊 I'M GONNA CUUUUM !! 🌊</div>
+                </div>
+              )}
+            </div>
+
+            <div className="audio-visualizer-dock">
+              <canvas ref={audioCanvasRef} width="600" height="40" className="audio-wave-canvas" />
+              <div className="dock-label">AUDIO TALK WAVE</div>
             </div>
           </div>
         )}
