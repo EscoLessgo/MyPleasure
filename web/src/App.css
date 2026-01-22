@@ -314,8 +314,51 @@ video {
   font-weight: 900;
   letter-spacing: 2px;
   color: #64748b;
-  margin-top: -10px;
-  margin-bottom: 5px;
+  text-transform: uppercase;
+}
+
+.visualizer-header {
+  width: 100%;
+  padding: 0 10px;
+  margin-bottom: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.visualizer-actions-mini {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-action-mini {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #818cf8;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-action-mini:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: #818cf8;
+}
+
+.btn-action-mini.active {
+  background: #6366f1;
+  color: white;
+  border-color: #818cf8;
+  box-shadow: 0 0 10px rgba(99, 102, 241, 0.3);
+}
+
+.canvas-container {
+  width: 100%;
+  display: flex;
+  justify-content: center;
 }
 
 .freehand-pad {
@@ -372,14 +415,6 @@ video {
   font-weight: 900;
   color: rgba(255, 255, 255, 0.3);
   letter-spacing: 2px;
-}
-
-.visualizer-actions {
-  display: flex;
-  gap: 10px;
-  margin-top: 15px;
-  width: 100%;
-  max-width: 300px;
 }
 
 .btn-toggle-freehand,

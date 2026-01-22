@@ -311,21 +311,28 @@ function App() {
 
     setTouchPos({ x: cx, y: cy });
 
-    // Map Y to Intensity with an exponential curve for better feel
-    // (100-cy) is 0 to 100. We cube it slightly to make lower ranges more precise.
-    const normalizedY = (100 - cy) / 100;
-    const curvedY = Math.pow(normalizedY, 1.2);
-    const intensity = Math.round(curvedY * 255);
+    // For stage-based devices, we map the Y-axis to the 3 physical speed modes
+    // Top is MAX (Stage 3), Bottom is LOW (Stage 1)
+    let stage = 1;
+    let intensity = 255;
 
-    // Throttle BLE writes but keep logic smooth
-    if (Math.abs(intensity - lastSentIntensity.current) > 3 || intensity === 0) {
+    const invertedY = 100 - cy;
+    if (invertedY > 66) stage = 3;
+    else if (invertedY > 33) stage = 2;
+    else if (invertedY > 5) stage = 1;
+    else { stage = 0; intensity = 0; } // Near bottom is stop
+
+    if (stage !== activePatternRef.current || (stage === 0 && lastSentIntensity.current !== 0)) {
+      setActivePattern(stage || 1);
+      activePatternRef.current = stage || 1;
+      setPowerLevel(stage);
+      powerLevelRef.current = stage;
       lastSentIntensity.current = intensity;
 
       if (role === 'bridge') {
-        // Force Mode 1 for "Lovense Style" seamless control
-        sendCommand(1, intensity);
+        sendCommand(stage, intensity);
       }
-      updateRemote('freehand', { x: cx, y: cy, intensity });
+      updateRemote('freehand', { x: cx, y: cy, intensity, stage });
     }
   };
 
@@ -527,6 +534,26 @@ function App() {
 
             <div className="controls-container">
               <div className="visualizer-section">
+                <div className="visualizer-header">
+                  <div className="vibe-label">CYBER-PULSE FEEDBACK</div>
+                  <div className="visualizer-actions-mini">
+                    <button
+                      className={`btn-action-mini ${isFreehand ? 'active' : ''}`}
+                      onClick={() => { setIsFreehand(!isFreehand); playSound('select'); }}
+                      title="Toggle Freehand Pad"
+                    >
+                      {isFreehand ? '📱 Grid' : '🎯 Freehand'}
+                    </button>
+                    <button
+                      className={`btn-action-mini ${isMicSync ? 'active' : ''}`}
+                      onClick={() => { toggleMicSync(); playSound('select'); }}
+                      title="Sync to Voice"
+                    >
+                      {isMicSync ? '🎤 ON' : '🎤 OFF'}
+                    </button>
+                  </div>
+                </div>
+
                 {isFreehand ? (
                   <div
                     className="freehand-pad"
@@ -544,26 +571,10 @@ function App() {
                     <div className="pad-label">DRAG TO VIBE</div>
                   </div>
                 ) : (
-                  <>
+                  <div className="canvas-container">
                     <canvas ref={canvasRef} width="300" height="200" className="vibe-canvas" />
-                    <div className="vibe-label">CYBER-PULSE FEEDBACK</div>
-                  </>
+                  </div>
                 )}
-                <div className="visualizer-actions">
-                  <button
-                    className={`btn-toggle-freehand ${isFreehand ? 'active' : ''}`}
-                    onClick={() => { setIsFreehand(!isFreehand); playSound('select'); }}
-                  >
-                    {isFreehand ? 'Grid View' : 'Freehand View'}
-                  </button>
-                  <button
-                    className={`btn-mic-sync ${isMicSync ? 'active' : ''}`}
-                    onClick={() => { toggleMicSync(); playSound('select'); }}
-                    title="Sync Vibe to Voice"
-                  >
-                    🎤 {isMicSync ? 'Sync ON' : 'Sync OFF'}
-                  </button>
-                </div>
               </div>
 
               <div className="power-guard-section">
@@ -675,9 +686,15 @@ function App() {
     setPowerLevel(val);
     powerLevelRef.current = val;
 
+    // For stage-based devices, Power Guard LOW/MED/MAX maps to Patterns 1, 2, 3
+    if (val > 0) {
+      setActivePattern(val);
+      activePatternRef.current = val;
+    }
+
     if (role === 'bridge') {
-      const intensity = getIntensityValue(val);
-      sendCommand(activePatternRef.current, intensity);
+      const intensity = 255; // Always full for defined stages
+      sendCommand(val, intensity);
     }
     updateRemote('power', val);
   }
