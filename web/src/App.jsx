@@ -69,9 +69,12 @@ function App() {
 
     socket.onmessage = async (event) => {
       const msg = JSON.parse(event.data);
+      addLog(`📨 Received: ${JSON.stringify(msg)}`);
+
       if (role === 'bridge' && msg.action === 'speed') {
         const val = parseInt(msg.value);
         setSpeed(val);
+        addLog(`🎮 Controller set speed to ${val}%`);
         sendVibeCommand(val);
       } else if (role === 'controller' && msg.action === 'status') {
         setStatus(`Bridge: ${msg.value}`);
@@ -140,9 +143,13 @@ function App() {
   const updateSpeed = (valStr) => {
     const val = parseInt(valStr);
     setSpeed(val);
+
     if (ws && role === 'controller') {
-      ws.send(JSON.stringify({ action: 'speed', value: val }));
+      const msg = { action: 'speed', value: val };
+      ws.send(JSON.stringify(msg));
+      addLog(`📤 Sent to bridge: ${val}%`);
     }
+
     // Local testing for bridge role
     if (role === 'bridge') {
       sendVibeCommand(val);
