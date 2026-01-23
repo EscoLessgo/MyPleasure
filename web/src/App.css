@@ -197,6 +197,40 @@ header {
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+.btn-discord {
+  padding: 16px;
+  background: #5865F2;
+  border: none;
+  border-radius: 12px;
+  color: white;
+  font-weight: 900;
+  cursor: pointer;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  box-shadow: 0 4px 15px rgba(88, 101, 242, 0.3);
+  transition: all 0.2s;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+}
+
+.btn-discord:hover {
+  filter: brightness(1.1);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(88, 101, 242, 0.4);
+}
+
+.divider {
+  text-align: center;
+  font-size: 10px;
+  font-weight: 900;
+  color: #64748b;
+  letter-spacing: 2px;
+  margin: 5px 0;
+}
+
 .btn-ble {
   background: linear-gradient(135deg, #ec4899, #db2777);
   box-shadow: 0 4px 15px rgba(236, 72, 153, 0.3);
