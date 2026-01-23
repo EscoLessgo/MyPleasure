@@ -528,58 +528,74 @@ video {
   }
 }
 
-.power-guard-section {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
-  background: rgba(15, 23, 42, 0.4);
-  padding: 10px;
-  border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.05);
+.stop-section {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 20px;
 }
 
-.p-guard-btn {
-  padding: 12px 5px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: #1e293b;
-  color: #64748b;
-  border-radius: 10px;
+.btn-stop-huge {
+  width: 100%;
+  padding: 16px;
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  color: white;
+  border: none;
+  border-radius: 12px;
+  font-size: 16px;
   font-weight: 900;
-  font-size: 11px;
-  cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  letter-spacing: 2px;
   text-transform: uppercase;
-  letter-spacing: 1px;
+  cursor: pointer;
+  box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4);
+  transition: all 0.2s;
 }
 
-.p-guard-btn:hover {
-  border-color: rgba(255, 255, 255, 0.3);
-  background: #334155;
-  color: white;
+.btn-stop-huge:hover {
+  transform: scale(1.02);
+  box-shadow: 0 6px 20px rgba(239, 68, 68, 0.6);
 }
 
-.p-guard-btn.active {
-  color: white;
-  border-color: #6366f1;
-  box-shadow: 0 0 15px rgba(99, 102, 241, 0.4);
+.bridge-utils {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 20px;
 }
 
-.p-guard-btn.active.off {
-  background: #ef4444;
-  border-color: #f87171;
-  box-shadow: 0 0 15px rgba(239, 68, 68, 0.4);
+.btn-invite {
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid #10b981;
+  color: #34d399;
+  padding: 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: bold;
+  font-size: 12px;
+  transition: all 0.2s;
 }
 
-.p-guard-btn.active.low {
-  background: #10b981;
+.btn-invite:hover {
+  background: rgba(16, 185, 129, 0.2);
 }
 
-.p-guard-btn.active.med {
-  background: #f59e0b;
+.invite-box {
+  display: flex;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid #34d399;
+  border-radius: 8px;
+  padding: 8px;
+  gap: 8px;
 }
 
-.p-guard-btn.active.max {
-  background: #8b5cf6;
+.invite-url {
+  flex: 1;
+  font-family: monospace;
+  font-size: 11px;
+  color: #34d399;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .patterns-section {

@@ -17,6 +17,34 @@ function App() {
     return sessionStorage.getItem('tf_auth') === 'true';
   });
   const [connected, setConnected] = useState(false);
+  const [inviteLink, setInviteLink] = useState('');
+
+  // --- Auto-Join Logic ---
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sessionParam = params.get('session');
+    const passcodeParam = params.get('passcode');
+    const roleParam = params.get('role');
+
+    if (passcodeParam === '6969') {
+      setIsAuthorized(true);
+      sessionStorage.setItem('tf_auth', 'true');
+    }
+    if (sessionParam) setDeviceId(sessionParam);
+    if (roleParam) setRole(roleParam);
+
+    // Auto-clean URL if we consumed params
+    if (sessionParam || passcodeParam) {
+      window.history.replaceState({}, document.title, "/");
+    }
+  }, []);
+
+  const generateInvite = () => {
+    const link = `${window.location.origin}/?session=${deviceId}&passcode=6969&role=controller`;
+    setInviteLink(link);
+    navigator.clipboard.writeText(link);
+    // Visual feedback handled in button
+  };
 
   // Type 'n' Talk State
   const [isTyping, setIsTyping] = useState(false);
@@ -522,8 +550,19 @@ function App() {
           </div>
         )}
 
-        {role === 'bridge' && connected && !bleDevice && (
-          <button onClick={connectBLE} className="btn-ble">Connect BLE Toy</button>
+        {role === 'bridge' && connected && (
+          <div className="bridge-utils">
+            {!bleDevice && <button onClick={connectBLE} className="btn-ble">Connect BLE Toy</button>}
+
+            {!inviteLink ? (
+              <button onClick={generateInvite} className="btn-invite">🔗 Copy Invite Link</button>
+            ) : (
+              <div className="invite-box">
+                <span className="invite-url text-truncate">{inviteLink}</span>
+                <button onClick={() => { setInviteLink(''); }} className="btn-icon">✅</button>
+              </div>
+            )}
+          </div>
         )}
 
         {connected && (
@@ -599,30 +638,12 @@ function App() {
 
               {!isFreehand && (
                 <>
-                  <div className="power-guard-section">
+                  <div className="stop-section">
                     <button
-                      className={`p-guard-btn off ${powerLevel === 0 ? 'active' : ''}`}
+                      className="btn-stop-huge"
                       onClick={() => { handlePowerChange(0); playSound('select'); }}
                     >
-                      OFF
-                    </button>
-                    <button
-                      className={`p-guard-btn low ${powerLevel === 1 ? 'active' : ''}`}
-                      onClick={() => { handlePowerChange(1); playSound('select'); }}
-                    >
-                      LOW
-                    </button>
-                    <button
-                      className={`p-guard-btn med ${powerLevel === 2 ? 'active' : ''}`}
-                      onClick={() => { handlePowerChange(2); playSound('select'); }}
-                    >
-                      MED
-                    </button>
-                    <button
-                      className={`p-guard-btn max ${powerLevel === 3 ? 'active' : ''}`}
-                      onClick={() => { handlePowerChange(3); playSound('select'); }}
-                    >
-                      MAX
+                      🛑 EMERGENCY STOP
                     </button>
                   </div>
 
