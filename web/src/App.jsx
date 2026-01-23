@@ -251,6 +251,16 @@ function App() {
         // Handle Type 'n' Talk Features
         if (msg.action === 'typing') {
           setRemoteIsTyping(msg.value);
+          // Typer-Vibe: Gentle pulse when remote is typing
+          if (role === 'bridge') {
+            if (msg.value) {
+              // Gentle pulse (low enough to be subtle, strong enough to feel)
+              if (activePatternRef.current === 0) sendCommand(1, 40);
+            } else {
+              // Stop only if we aren't in a persistent power mode
+              if (powerLevelRef.current === 0) sendCommand(0, 0);
+            }
+          }
         } else if (msg.action === 'reaction') {
           setLastReaction(msg.value);
           setTimeout(() => setLastReaction(null), 2000);
@@ -538,22 +548,31 @@ function App() {
                 {isMicSync ? '🎤 MIC SYNC ON' : '🎤 ENABLE MIC SYNC'}
               </button>
               <div className="reaction-tags">
-                <button onClick={() => { handleReaction('up'); playSound('select'); }} title="Fire" className="btn-tag">🔥</button>
-                <button onClick={() => { handleReaction('down'); playSound('select'); }} title="Freeze" className="btn-tag">🧊</button>
+                <button onClick={() => { handleReaction('up'); playSound('select'); }} title="Like" className="btn-tag">�</button>
+                <button onClick={() => { handleReaction('down'); playSound('select'); }} title="Dislike" className="btn-tag">👎</button>
                 <button onClick={() => { handleClimax(); playSound('select'); }} className="btn-climax-mini">CUUUUM!</button>
               </div>
+            </div>
+
+            <div className="main-mode-tabs">
+              <button
+                className={`tab-btn ${!isFreehand ? 'active' : ''}`}
+                onClick={() => { setIsFreehand(false); playSound('select'); }}
+              >
+                🎮 GRID CONTROL
+              </button>
+              <button
+                className={`tab-btn ${isFreehand ? 'active' : ''}`}
+                onClick={() => { setIsFreehand(true); playSound('select'); }}
+              >
+                🎯 FREEHAND PAD
+              </button>
             </div>
 
             <div className="controls-container">
               <div className="visualizer-section">
                 <div className="visualizer-header">
                   <div className="vibe-label">CYBER-PULSE FEEDBACK</div>
-                  <button
-                    className={`btn-mode-toggle ${isFreehand ? 'freehand' : 'grid'}`}
-                    onClick={() => { setIsFreehand(!isFreehand); playSound('select'); }}
-                  >
-                    {isFreehand ? 'SWITCH TO GRID' : 'SWITCH TO FREEHAND'}
-                  </button>
                 </div>
 
                 {isFreehand ? (
@@ -632,7 +651,7 @@ function App() {
               <div className="messages">
                 {lastReaction && (
                   <div className="reaction-overlay animate-pop">
-                    {lastReaction === 'up' ? '�' : '🧊'}
+                    {lastReaction === 'up' ? '👍' : '👎'}
                   </div>
                 )}
                 {messages.map((m, i) => (
