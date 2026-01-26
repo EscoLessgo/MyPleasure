@@ -1,4 +1,29 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  Shield,
+  Settings,
+  Gamepad2,
+  MessageSquare,
+  Image as ImageIcon,
+  Zap,
+  Wifi,
+  WifiOff,
+  Bluetooth,
+  Mic,
+  MicOff,
+  ArrowRight,
+  Lock,
+  Plus,
+  Heart,
+  Activity,
+  Maximize2,
+  Trash2,
+  Send,
+  Eye,
+  EyeOff,
+  Video
+} from 'lucide-react';
 import './App.css';
 import { PATTERNS } from './patterns';
 
@@ -9,90 +34,70 @@ const WS_URL = `${protocol}//${host}`;
 const JOYHUB_SERVICE_UUID = '0000ffa0-0000-1000-8000-00805f9b34fb';
 const JOYHUB_TX_CHAR_UUID = '0000ffa1-0000-1000-8000-00805f9b34fb';
 
+// Mock NSFW Media for demonstration (Antigravity can generate real placeholders later)
+const INITIAL_MEDIA = [
+  { id: 1, type: 'image', url: 'https://images.unsplash.com/photo-1515825838458-f2a94b20105a?w=800&q=80', label: 'Shadow Bloom', nsfw: true },
+  { id: 2, type: 'video', url: 'https://assets.mixkit.co/videos/preview/mixkit-pink-and-purple-ink-clouds-spreading-in-water-31414-large.mp4', label: 'Silk Flow', nsfw: true },
+  { id: 3, type: 'image', url: 'https://images.unsplash.com/photo-1550684848-fac1c5b4e853?w=800&q=80', label: 'Ember Gloom', nsfw: true },
+];
+
 function App() {
-  const [role, setRole] = useState(null);
-  const [deviceId, setDeviceId] = useState('trueform-1');
+  const [activeTab, setActiveTab] = useState('controls');
+  const [isAuthorized, setIsAuthorized] = useState(() => sessionStorage.getItem('tf_auth') === 'true');
   const [passcode, setPasscode] = useState('');
-  const [isAuthorized, setIsAuthorized] = useState(() => {
-    return sessionStorage.getItem('tf_auth') === 'true';
-  });
+  const [role, setRole] = useState(null);
   const [connected, setConnected] = useState(false);
+  const [status, setStatus] = useState('Disconnected');
+  const [deviceId, setDeviceId] = useState('TrueForm-Alpha');
   const [inviteLink, setInviteLink] = useState('');
 
-  // --- Auto-Join Logic ---
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const sessionParam = params.get('session');
-    const passcodeParam = params.get('passcode');
-    const roleParam = params.get('role');
-
-    if (passcodeParam === '6969') {
-      setIsAuthorized(true);
-      sessionStorage.setItem('tf_auth', 'true');
-    }
-    if (sessionParam) setDeviceId(sessionParam);
-    if (roleParam) setRole(roleParam);
-
-    // Auto-clean URL if we consumed params
-    if (sessionParam || passcodeParam) {
-      window.history.replaceState({}, document.title, "/");
-    }
-  }, []);
-
-  const generateInvite = () => {
-    const link = `${window.location.origin}/?session=${deviceId}&passcode=6969&role=controller`;
-    setInviteLink(link);
-    navigator.clipboard.writeText(link);
-    // Visual feedback handled in button
-  };
-
-  // Type 'n' Talk State
-  const [isTyping, setIsTyping] = useState(false);
-  const [remoteIsTyping, setRemoteIsTyping] = useState(false);
-  const [lastReaction, setLastReaction] = useState(null);
-  const [showClimaxOverlay, setShowClimaxOverlay] = useState(false);
-  const typingTimeoutRef = useRef(null);
-
-  // Remote Control State & Refs for stable WS access
+  // Power & Control State
   const [powerLevel, setPowerLevel] = useState(0);
   const [activePattern, setActivePattern] = useState(1);
-  const powerLevelRef = useRef(0);
-  const activePatternRef = useRef(1);
-
-  // Chat & Media State
+  const [notifications, setNotifications] = useState([]);
   const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState('');
-  const [remoteStream, setRemoteStream] = useState(null);
+  const [isTyping, setIsTyping] = useState(false);
+  const [remoteIsTyping, setRemoteIsTyping] = useState(false);
+
+  // Media State
+  const [mediaVault, setMediaVault] = useState(INITIAL_MEDIA);
+  const [showNsfw, setShowNsfw] = useState(false);
+  const [isPanic, setIsPanic] = useState(false);
+
+  // BLE & WS Refs
+  const ws = useRef(null);
+  const bleDevice = useRef(null);
+  const bleCharsRef = useRef([]);
+  const isWritingRef = useRef(false);
+  const lastPulseRef = useRef(0);
+  const typingTimeoutRef = useRef(null);
+
+  // WebRTC Refs
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const peerConnection = useRef(null);
-  const canvasRef = useRef(null);
-  const audioCanvasRef = useRef(null);
-  const requestRef = useRef();
-  const audioCtxRef = useRef(null);
-  const analystRef = useRef(null);
+  const [remoteStream, setRemoteStream] = useState(null);
 
-  const [status, setStatus] = useState('Disconnected');
-  const [ws, setWs] = useState(null);
-  const [bleDevice, setBleDevice] = useState(null);
-  const [isFreehand, setIsFreehand] = useState(false);
-  const [isMicSync, setIsMicSync] = useState(false);
-  const [touchPos, setTouchPos] = useState({ x: 50, y: 50 });
-  const bleCharsRef = useRef([]);
-  const isWritingRef = useRef(false);
-  const lastSentIntensity = useRef(0);
-  const syncIntervalRef = useRef(null);
+  // --- Core Utility Functions ---
+  const addNotification = (type, title, msg) => {
+    const id = Date.now();
+    setNotifications(prev => [{ id, type, title, msg }, ...prev].slice(0, 3));
+    setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 5000);
+  };
 
-  // --- BLE Functions ---
+  const getIntensityValue = (level) => {
+    if (level === 0) return 0;
+    if (level === 1) return 60;
+    if (level === 2) return 145;
+    return 255;
+  };
+
   const sendCommand = async (mode, intensity) => {
     if (!bleCharsRef.current.length || isWritingRef.current) return;
     isWritingRef.current = true;
-
-    // Safety check for mode 0
     const finalMode = intensity === 0 ? 0 : mode;
-    const finalIntensity = intensity;
-
-    const cmd = new Uint8Array([0xa0, 0x0c, 0x00, 0x00, finalMode, finalIntensity]);
+    const cmd = new Uint8Array([0xa0, 0x0c, 0x00, 0x00, finalMode, intensity]);
     try {
       await bleCharsRef.current[0].writeValue(cmd);
     } catch (err) {
@@ -102,57 +107,98 @@ function App() {
     }
   };
 
-  const getIntensityValue = (level) => {
-    if (level === 0) return 0;
-    if (level === 1) return 60;   // Quieter Low
-    if (level === 2) return 145;  // Punchier Med
-    return 255;                  // Max
-  };
-
-  const startAudioAnalysis = (analyzer) => {
-    if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
-    const buffer = new Uint8Array(analyzer.frequencyBinCount);
-
-    syncIntervalRef.current = setInterval(() => {
-      analyzer.getByteFrequencyData(buffer);
-      const average = buffer.reduce((a, b) => a + b) / buffer.length;
-      const intensity = Math.min(255, Math.pow(average / 40, 1.5) * 150);
-
-      if (intensity > 20 && Math.abs(intensity - lastSentIntensity.current) > 10) {
-        lastSentIntensity.current = Math.round(intensity);
-        if (role === 'bridge') sendCommand(1, lastSentIntensity.current);
-        updateRemote('audio-vibe', lastSentIntensity.current);
-      } else if (intensity <= 20 && lastSentIntensity.current !== 0) {
-        lastSentIntensity.current = 0;
-        if (role === 'bridge') sendCommand(0, 0);
-        updateRemote('audio-vibe', 0);
-      }
-    }, 100);
-  };
-
-  const toggleMicSync = async () => {
-    if (isMicSync) {
-      setIsMicSync(false);
-      if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
-      if (role === 'bridge') sendCommand(0, 0);
-    } else {
-      setIsMicSync(true);
-      if (role === 'controller') {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        setupAudioVisualizer(stream, true);
-      } else if (role === 'bridge' && analystRef.current) {
-        startAudioAnalysis(analystRef.current);
-      }
+  const updateRemote = (action, value) => {
+    if (ws.current && connected) {
+      ws.current.send(JSON.stringify({ action, value }));
     }
   };
 
-  // --- WebRTC Functions ---
+  // --- WebSocket Logic ---
+  const connectWS = () => {
+    if (ws.current) ws.current.close();
+    const socket = new WebSocket(`${WS_URL}?deviceId=${deviceId}&type=${role}`);
+    socket.onopen = () => {
+      setStatus('Online');
+      setConnected(true);
+      addNotification('success', 'System Connected', `Link established with ${deviceId}`);
+      startMedia();
+    };
+    socket.onclose = () => {
+      setStatus('Offline');
+      setConnected(false);
+      addNotification('error', 'Connection Lost', 'WebSocket link severed.');
+    };
+    socket.onmessage = async (event) => {
+      const msg = JSON.parse(event.data);
+      handleIncomingMessage(msg);
+    };
+    ws.current = socket;
+  };
+
+  const handleIncomingMessage = async (msg) => {
+    switch (msg.action) {
+      case 'power':
+        const level = parseInt(msg.value);
+        setPowerLevel(level);
+        if (role === 'bridge') sendCommand(activePattern, getIntensityValue(level));
+        break;
+      case 'pattern':
+        const pattern = parseInt(msg.value);
+        setActivePattern(pattern);
+        if (role === 'bridge') sendCommand(pattern, getIntensityValue(powerLevel || 1));
+        break;
+      case 'chat':
+        setMessages(prev => [...prev, msg.value].slice(-50));
+        break;
+      case 'typing':
+        setRemoteIsTyping(msg.value);
+        break;
+      case 'offer':
+        await peerConnection.current.setRemoteDescription(new RTCSessionDescription(msg.offer));
+        const answer = await peerConnection.current.createAnswer();
+        await peerConnection.current.setLocalDescription(answer);
+        updateRemote('answer', answer);
+        break;
+      case 'answer':
+        await peerConnection.current.setRemoteDescription(new RTCSessionDescription(msg.answer));
+        break;
+      case 'ice-candidate':
+        try { await peerConnection.current.addIceCandidate(new RTCIceCandidate(msg.candidate)); } catch (e) { }
+        break;
+      case 'media-sync':
+        // Handle remote media playing
+        addNotification('info', 'Remote Sync', `Partner is viewing: ${msg.value}`);
+        break;
+      default:
+        break;
+    }
+  };
+
+  // --- BLE Logic ---
+  const connectBLE = async () => {
+    try {
+      const device = await navigator.bluetooth.requestDevice({
+        filters: [{ namePrefix: 'J-' }],
+        optionalServices: [JOYHUB_SERVICE_UUID]
+      });
+      const server = await device.gatt.connect();
+      const service = await server.getPrimaryService(JOYHUB_SERVICE_UUID);
+      const txChar = await service.getCharacteristic(JOYHUB_TX_CHAR_UUID);
+      bleCharsRef.current = [txChar];
+      bleDevice.current = device;
+      addNotification('success', 'Hardware Linked', 'JoyHub device is now active.');
+      updateRemote('status', 'Hardware Connected');
+    } catch (err) {
+      addNotification('error', 'Link Failed', err.message);
+    }
+  };
+
+  // --- Media Logic ---
   const startMedia = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       if (localVideoRef.current) localVideoRef.current.srcObject = stream;
 
-      // Setup PEER connection
       peerConnection.current = new RTCPeerConnection({
         iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
       });
@@ -160,158 +206,25 @@ function App() {
       stream.getTracks().forEach(track => peerConnection.current.addTrack(track, stream));
 
       peerConnection.current.ontrack = (event) => {
-        const stream = event.streams[0];
-        setRemoteStream(stream);
-        if (remoteVideoRef.current) remoteVideoRef.current.srcObject = stream;
-        setupAudioVisualizer(stream);
+        setRemoteStream(event.streams[0]);
+        if (remoteVideoRef.current) remoteVideoRef.current.srcObject = event.streams[0];
       };
 
       peerConnection.current.onicecandidate = (event) => {
-        if (event.candidate && ws) {
-          ws.send(JSON.stringify({ action: 'ice-candidate', candidate: event.candidate }));
-        }
+        if (event.candidate) updateRemote('ice-candidate', event.candidate);
       };
     } catch (err) {
       console.error('Media fail:', err);
     }
   };
 
-  const setupAudioVisualizer = async (stream, isLocal = false) => {
-    if (!audioCanvasRef.current) return;
-    try {
-      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      const source = audioCtx.createMediaStreamSource(stream);
-      const analyzer = audioCtx.createAnalyser();
-      analyzer.fftSize = 256;
-      source.connect(analyzer);
-      audioCtxRef.current = audioCtx;
-      analystRef.current = analyzer;
-      drawAudioWave();
-
-      if (isLocal) {
-        startAudioAnalysis(analyzer);
-      }
-    } catch (e) { console.error('Audio Setup Fail:', e); }
-  };
-
-  const drawAudioWave = () => {
-    if (!analystRef.current || !audioCanvasRef.current) return;
-    const canvas = audioCanvasRef.current;
-    const ctx = canvas.getContext('2d');
-    const dataArray = new Uint8Array(analystRef.current.frequencyBinCount);
-
-    const render = () => {
-      analystRef.current.getByteFrequencyData(dataArray);
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      const barWidth = (canvas.width / dataArray.length) * 2.5;
-      let x = 0;
-      for (let i = 0; i < dataArray.length; i++) {
-        const barHeight = dataArray[i] / 2;
-        ctx.fillStyle = `rgb(99, 102, 241)`;
-        ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
-        x += barWidth + 1;
-      }
-      requestAnimationFrame(render);
-    };
-    render();
-  };
-
   const createOffer = async () => {
     const offer = await peerConnection.current.createOffer();
     await peerConnection.current.setLocalDescription(offer);
-    ws.send(JSON.stringify({ action: 'offer', offer }));
+    updateRemote('offer', offer);
   };
 
-  // --- WebSocket Sync ---
-  const updateRemote = (action, value) => {
-    if (ws && connected) {
-      ws.send(JSON.stringify({ action, value }));
-    }
-  };
-
-  useEffect(() => {
-    if (ws) {
-      ws.onmessage = async (event) => {
-        const msg = JSON.parse(event.data);
-
-        // Handle Control
-        if (role === 'bridge') {
-          if (msg.action === 'power') {
-            const level = parseInt(msg.value);
-            setPowerLevel(level);
-            powerLevelRef.current = level;
-
-            const intensity = getIntensityValue(level);
-            sendCommand(activePatternRef.current, intensity);
-          } else if (msg.action === 'pattern') {
-            const pattern = parseInt(msg.value);
-            setActivePattern(pattern);
-            activePatternRef.current = pattern;
-
-            if (powerLevelRef.current === 0) {
-              setPowerLevel(1);
-              powerLevelRef.current = 1;
-            }
-            const intensity = getIntensityValue(powerLevelRef.current);
-            sendCommand(pattern, intensity);
-          }
-        }
-
-        // Handle Chat
-        if (msg.action === 'chat') {
-          setMessages(prev => [...prev, msg.value].slice(-20));
-        }
-
-        // Handle WebRTC Signaling
-        if (msg.action === 'offer') {
-          await peerConnection.current.setRemoteDescription(new RTCSessionDescription(msg.offer));
-          const answer = await peerConnection.current.createAnswer();
-          await peerConnection.current.setLocalDescription(answer);
-          ws.send(JSON.stringify({ action: 'answer', answer }));
-        } else if (msg.action === 'answer') {
-          await peerConnection.current.setRemoteDescription(new RTCSessionDescription(msg.answer));
-        } else if (msg.action === 'ice-candidate') {
-          try {
-            await peerConnection.current.addIceCandidate(new RTCIceCandidate(msg.candidate));
-          } catch (e) { }
-        }
-
-        // Handle Type 'n' Talk Features
-        if (msg.action === 'typing') {
-          setRemoteIsTyping(msg.value);
-          // Typer-Vibe: Gentle pulse when remote is typing
-          if (role === 'bridge') {
-            if (msg.value) {
-              // Gentle pulse (low enough to be subtle, strong enough to feel)
-              if (activePatternRef.current === 0) sendCommand(1, 40);
-            } else {
-              // Stop only if we aren't in a persistent power mode
-              if (powerLevelRef.current === 0) sendCommand(0, 0);
-            }
-          }
-        } else if (msg.action === 'reaction') {
-          setLastReaction(msg.value);
-          setTimeout(() => setLastReaction(null), 2000);
-        } else if (msg.action === 'climax') {
-          setShowClimaxOverlay(true);
-          setTimeout(() => setShowClimaxOverlay(false), 3000);
-          if (role === 'bridge') {
-            sendCommand(1, 255);
-            setTimeout(() => sendCommand(activePatternRef.current, getIntensityValue(powerLevelRef.current)), 2000);
-          }
-        } else if (msg.action === 'freehand') {
-          setTouchPos({ x: msg.value.x, y: msg.value.y });
-          setIsFreehand(true); // Automatically switch to freehand view on remote move
-          if (role === 'bridge') {
-            sendCommand(msg.value.stage || 1, msg.value.intensity);
-          }
-        } else if (msg.action === 'audio-vibe') {
-          if (role === 'bridge') sendCommand(1, msg.value);
-        }
-      };
-    }
-  }, [ws, role, isFreehand]);
-
+  // --- Handlers ---
   const handleTyping = (text) => {
     setInputText(text);
     if (!isTyping) {
@@ -325,423 +238,434 @@ function App() {
     }, 2000);
   };
 
-  const handleReaction = (type) => {
-    updateRemote('reaction', type);
-  };
-
-  const handleClimax = () => {
-    updateRemote('climax', true);
-    setShowClimaxOverlay(true);
-    setTimeout(() => setShowClimaxOverlay(false), 4000);
-  };
-
-  const handleFreehandMove = (e) => {
-    if (!isFreehand) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const touch = e.touches ? e.touches[0] : e;
-    const x = ((touch.clientX - rect.left) / rect.width) * 100;
-    const y = ((touch.clientY - rect.top) / rect.height) * 100;
-
-    // Constrain to 0-100
-    const cx = Math.max(0, Math.min(100, x));
-    const cy = Math.max(0, Math.min(100, y));
-
-    setTouchPos({ x: cx, y: cy });
-
-    // For stage-based devices, we map the Y-axis to the 3 physical speed modes
-    let stage = 1;
-    let intensity = 255;
-
-    const invertedY = 100 - cy;
-    if (invertedY > 66) stage = 3;
-    else if (invertedY > 33) stage = 2;
-    else if (invertedY > 5) stage = 1;
-    else { stage = 0; intensity = 0; }
-
-    if (Math.abs(intensity - lastSentIntensity.current) > 2 || stage !== activePatternRef.current) {
-      lastSentIntensity.current = intensity;
-      setActivePattern(stage || 1);
-      activePatternRef.current = stage || 1;
-      setPowerLevel(stage);
-      powerLevelRef.current = stage;
-
-      if (role === 'bridge') {
-        sendCommand(stage, intensity);
-      }
-      updateRemote('freehand', { x: cx, y: cy, intensity, stage });
-    }
-  };
-
-  const handleSendMessage = () => {
+  const sendMessage = () => {
     if (!inputText.trim()) return;
-    const msg = { user: role, text: inputText };
+    const msg = { user: role, text: inputText, timestamp: new Date().toLocaleTimeString() };
     updateRemote('chat', msg);
-    setMessages(prev => [...prev, msg]);
+    setMessages(prev => [...prev, msg].slice(-50));
     setInputText('');
   };
 
-  // --- Sound Engine ---
-  const playSound = (type) => {
-    try {
-      if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
-      const ctx = audioCtxRef.current;
-      const gain = ctx.createGain();
-
-      const now = ctx.currentTime;
-      if (type === 'hover') {
-        const osc = ctx.createOscillator();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(660, now);
-        osc.frequency.exponentialRampToValueAtTime(880, now + 0.05);
-        gain.gain.setValueAtTime(0.02, now);
-        gain.gain.linearRampToValueAtTime(0, now + 0.05);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(now);
-        osc.stop(now + 0.05);
-      } else if (type === 'select') {
-        const osc1 = ctx.createOscillator();
-        const osc2 = ctx.createOscillator();
-        osc1.frequency.setValueAtTime(440, now);
-        osc2.frequency.setValueAtTime(880, now);
-        gain.gain.setValueAtTime(0.04, now);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
-        osc1.connect(gain);
-        osc2.connect(gain);
-        gain.connect(ctx.destination);
-        osc1.start(now);
-        osc2.start(now);
-        osc1.stop(now + 0.2);
-        osc2.stop(now + 0.2);
-      }
-    } catch (e) { }
-  };
-
-  // --- Realtime Visualizer Logic ---
-  const animate = (time) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    const { width, height } = canvas;
-    ctx.clearRect(0, 0, width, height);
-
-    const centerX = width / 2;
-    const centerY = height / 2;
-    const baseRadius = 40 + (powerLevel * 15);
-    const timeFactor = time / 1000;
-
-    // Draw Outer Pulse
-    const pulse = Math.sin(timeFactor * (powerLevel + 2) * 2) * 10;
-    const gradient = ctx.createRadialGradient(centerX, centerY, 5, centerX, centerY, baseRadius + pulse);
-    gradient.addColorStop(0, role === 'bridge' ? '#ec4899' : '#6366f1');
-    gradient.addColorStop(1, 'transparent');
-
-    ctx.fillStyle = gradient;
-    ctx.beginPath();
-    ctx.arc(centerX, centerY, baseRadius + pulse, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Draw Orbiting Particles based on Pattern
-    const particleCount = 10 + (powerLevel * 5);
-    for (let i = 0; i < particleCount; i++) {
-      const angle = (timeFactor * (powerLevel + 1)) + (i * ((Math.PI * 2) / particleCount));
-      const dist = baseRadius + 20 + Math.cos(timeFactor * (activePattern % 5 + 1) + i) * 10;
-      const px = centerX + Math.cos(angle) * dist;
-      const py = centerY + Math.sin(angle) * dist;
-
-      ctx.fillStyle = role === 'bridge' ? '#f472b6' : '#818cf8';
-      ctx.beginPath();
-      ctx.arc(px, py, 2 + (powerLevel), 0, Math.PI * 2);
-      ctx.fill();
+  const toggleNsfw = () => {
+    if (!showNsfw) {
+      // Small vibration feedback if bridge
+      if (role === 'bridge') sendCommand(1, 40);
+      setTimeout(() => role === 'bridge' && sendCommand(0, 0), 100);
     }
-
-    requestRef.current = requestAnimationFrame(animate);
+    setShowNsfw(!showNsfw);
   };
 
-  useEffect(() => {
-    requestRef.current = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(requestRef.current);
-  }, [powerLevel, activePattern]);
-
-  const connectWS = async () => {
-    if (ws) ws.close();
-    const socket = new WebSocket(`${WS_URL}?deviceId=${deviceId}&type=${role}`);
-    socket.onopen = () => { setStatus('Connected'); setConnected(true); startMedia(); };
-    socket.onclose = () => { setStatus('Disconnected'); setConnected(false); };
-    setWs(socket);
-  };
-
-  const connectBLE = async () => {
-    try {
-      const device = await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: 'J-' }], optionalServices: [JOYHUB_SERVICE_UUID] });
-      const server = await device.gatt.connect();
-      const service = await server.getPrimaryService(JOYHUB_SERVICE_UUID);
-      const txChar = await service.getCharacteristic(JOYHUB_TX_CHAR_UUID);
-      bleCharsRef.current = [txChar];
-      setBleDevice(device);
-      if (ws) ws.send(JSON.stringify({ action: 'status', value: 'Bridge Connected' }));
-    } catch (err) { console.error(err); }
-  };
-
-  if (!isAuthorized) {
-    return (
-      <div className="setup-container">
-        <div className="logo">🛡️ Secure Bridge</div>
-        <div className="passcode-gate">
-          <p>Enter Session Passcode</p>
+  // --- Views ---
+  const AuthView = () => (
+    <div className="min-h-screen flex items-center justify-center p-6">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="glass-premium p-12 max-w-md w-full text-center space-y-8"
+      >
+        <div className="flex justify-center">
+          <div className="p-4 bg-purple-500/10 rounded-3xl border border-purple-500/20">
+            <Lock className="text-purple-400" size={48} />
+          </div>
+        </div>
+        <div>
+          <h1 className="text-4xl font-black text-gradient italic tracking-tighter">SECURE ACCESS</h1>
+          <p className="text-xs text-muted uppercase tracking-[0.3em] mt-2">TRUEFORM • PROTOCOL</p>
+        </div>
+        <div className="space-y-4">
           <input
             type="password"
-            placeholder="****"
+            placeholder="ENTER PASSCODE"
+            className="input-premium text-center text-xl tracking-[0.5em] font-black"
             value={passcode}
             onChange={(e) => setPasscode(e.target.value)}
-            className="device-input"
+            onKeyPress={(e) => e.key === 'Enter' && handleAuth()}
           />
-          <button
-            onClick={() => {
-              if (passcode === '6969') {
-                setIsAuthorized(true);
-                sessionStorage.setItem('tf_auth', 'true');
-                playSound('select');
-              } else {
-                alert('Wrong Passcode');
-              }
-            }}
-            className="btn-connect"
-          >
-            Authorize Access
+          <button onClick={handleAuth} className="btn-premium w-full">
+            ESTABLISH LINK <ArrowRight size={18} />
           </button>
         </div>
-      </div>
-    );
-  }
-
-  if (!role) {
-    return (
-      <div className="setup-container">
-        <div className="logo">⚡ TrueForm Remote IM</div>
-        <div className="role-selector">
-          <button onClick={() => setRole('controller')} className="btn-large controller">
-            <span className="icon">🎮</span> Controller
-          </button>
-          <button onClick={() => setRole('bridge')} className="btn-large bridge">
-            <span className="icon">🔗</span> Bridge
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className={`app ${role}`}>
-      <header>
-        <h1>{role === 'bridge' ? '🔗 Bridge' : '🎮 Controller'}</h1>
-        <div className={`status ${connected ? 'connected' : ''}`}>{status}</div>
-        <div className="header-actions">
-          <button onClick={() => { sessionStorage.removeItem('tf_auth'); setIsAuthorized(false); }} title="Lock Site" className="btn-icon">🔒</button>
-          <button onClick={() => setRole(null)} className="btn-reset">Reset</button>
-        </div>
-      </header>
-
-      <main>
-        {!connected && (
-          <div className="connect-card">
-            <input type="text" value={deviceId} onChange={(e) => setDeviceId(e.target.value)} className="device-input" />
-            <button onClick={connectWS} className="btn-connect">Join Session</button>
-          </div>
-        )}
-
-        {role === 'bridge' && connected && (
-          <div className="bridge-utils">
-            {!bleDevice && <button onClick={connectBLE} className="btn-ble">Connect BLE Toy</button>}
-
-            {!inviteLink ? (
-              <button onClick={generateInvite} className="btn-invite">🔗 Copy Invite Link</button>
-            ) : (
-              <div className="invite-box">
-                <span className="invite-url text-truncate">{inviteLink}</span>
-                <button onClick={() => { setInviteLink(''); }} className="btn-icon">✅</button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {connected && (
-          <div className="immersive-container">
-            <div className="media-section">
-              <div className="video-container">
-                <video ref={localVideoRef} autoPlay muted playsInline />
-                <div className="video-label">YOU</div>
-              </div>
-              <div className="video-container">
-                <video ref={remoteVideoRef} autoPlay playsInline />
-                <div className="video-label">REMOTE</div>
-                {!remoteStream && <button onClick={createOffer} className="btn-call">START CALL</button>}
-              </div>
-            </div>
-
-            <div className="talk-suite-bar">
-              <button
-                className={`btn-talk ${isMicSync ? 'active' : ''}`}
-                onClick={() => { toggleMicSync(); playSound('select'); }}
-              >
-                {isMicSync ? '🎤 MIC SYNC ON' : '🎤 ENABLE MIC SYNC'}
-              </button>
-              <div className="reaction-tags">
-                <button onClick={() => { handleReaction('up'); playSound('select'); }} title="Like" className="btn-tag">�</button>
-                <button onClick={() => { handleReaction('down'); playSound('select'); }} title="Dislike" className="btn-tag">👎</button>
-                <button onClick={() => { handleClimax(); playSound('select'); }} className="btn-climax-mini">CUUUUM!</button>
-              </div>
-            </div>
-
-            <div className="main-mode-tabs">
-              <button
-                className={`tab-btn ${!isFreehand ? 'active' : ''}`}
-                onClick={() => { setIsFreehand(false); playSound('select'); }}
-              >
-                🎮 GRID CONTROL
-              </button>
-              <button
-                className={`tab-btn ${isFreehand ? 'active' : ''}`}
-                onClick={() => { setIsFreehand(true); playSound('select'); }}
-              >
-                🎯 FREEHAND PAD
-              </button>
-            </div>
-
-            <div className="controls-container">
-              <div className="visualizer-section">
-                <div className="visualizer-header">
-                  <div className="vibe-label">CYBER-PULSE FEEDBACK</div>
-                </div>
-
-                {isFreehand ? (
-                  <div
-                    className="freehand-pad"
-                    onMouseMove={handleFreehandMove}
-                    onTouchMove={handleFreehandMove}
-                  >
-                    <div
-                      className="touch-dot"
-                      style={{ left: `${touchPos.x}%`, top: `${touchPos.y}%` }}
-                    >
-                      <div className="dot-ripple" />
-                    </div>
-                    <canvas ref={canvasRef} width="300" height="250" className="vibe-canvas-free" />
-                    <div className="pad-label">DRAG TO CONTROL SPEED</div>
-                  </div>
-                ) : (
-                  <div className="canvas-container">
-                    <canvas ref={canvasRef} width="300" height="200" className="vibe-canvas" />
-                  </div>
-                )}
-              </div>
-
-              {!isFreehand && (
-                <>
-                  <div className="stop-section">
-                    <button
-                      className="btn-stop-huge"
-                      onClick={() => { handlePowerChange(0); playSound('select'); }}
-                    >
-                      🛑 EMERGENCY STOP
-                    </button>
-                  </div>
-
-                  <div className="patterns-section">
-                    <div className="patterns-grid">
-                      {PATTERNS.map(p => (
-                        <button
-                          key={p.id}
-                          className={`pattern-btn ${activePattern === p.id ? 'active' : ''}`}
-                          onClick={() => { handlePatternChange(p.id); playSound('select'); }}
-                        >
-                          <span className="p-icon">{p.icon}</span>
-                          <span className="p-name">{p.name}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-
-            <div className="chat-section">
-              <div className="typing-indicator">
-                {remoteIsTyping && <span className="typing-dot">Remote is typing...</span>}
-              </div>
-              <div className="messages">
-                {lastReaction && (
-                  <div className="reaction-overlay animate-pop">
-                    {lastReaction === 'up' ? '👍' : '👎'}
-                  </div>
-                )}
-                {messages.map((m, i) => (
-                  <div key={i} className={`msg ${m.user === role ? 'own' : ''}`}>
-                    <b>{m.user}:</b> {m.text}
-                  </div>
-                ))}
-              </div>
-
-              <div className="chat-input">
-                <input
-                  value={inputText}
-                  onChange={(e) => handleTyping(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                  placeholder="Type to talk..."
-                />
-              </div>
-            </div>
-
-            {showClimaxOverlay && (
-              <div className="climax-toast">
-                🌊 <span className="toast-text">I'M GONNA CUUUUM !!</span> 🌊
-              </div>
-            )}
-
-            <div className="audio-visualizer-dock">
-              <canvas ref={audioCanvasRef} width="600" height="40" className="audio-wave-canvas" />
-              <div className="dock-label">AUDIO TALK WAVE</div>
-            </div>
-          </div>
-        )}
-      </main>
+      </motion.div>
     </div>
   );
 
-  function handlePowerChange(level) {
-    const val = parseInt(level);
-    setPowerLevel(val);
-    powerLevelRef.current = val;
-
-    // For stage-based devices, Power Guard LOW/MED/MAX maps to Patterns 1, 2, 3
-    if (val > 0) {
-      setActivePattern(val);
-      activePatternRef.current = val;
+  const handleAuth = () => {
+    if (passcode === '6969') {
+      setIsAuthorized(true);
+      sessionStorage.setItem('tf_auth', 'true');
+      addNotification('success', 'Access Granted', 'Security protocol bypassed.');
+    } else {
+      addNotification('error', 'Access Denied', 'Invalid security token.');
     }
+  };
 
-    if (role === 'bridge') {
-      const intensity = 255; // Always full for defined stages
-      sendCommand(val, intensity);
-    }
-    updateRemote('power', val);
+  if (isPanic) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center cursor-pointer" onClick={() => setIsPanic(false)}>
+        <div className="text-[10px] text-white/5 uppercase tracking-[1em]">System Offline</div>
+      </div>
+    );
   }
-  function handlePatternChange(patId) {
-    const val = parseInt(patId);
-    setActivePattern(val);
-    activePatternRef.current = val;
 
-    // Default to Low power if turning on a pattern when stopped
-    if (powerLevelRef.current === 0) {
-      setPowerLevel(1);
-      powerLevelRef.current = 1;
-    }
+  const SetupView = () => (
+    <div className="min-h-screen flex items-center justify-center p-6">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="grid md:grid-cols-2 gap-8 max-w-4xl w-full"
+      >
+        <div className="glass p-10 space-y-8 flex flex-col justify-center text-center">
+          <div className="flex justify-center">
+            <div className="p-5 bg-indigo-500/10 rounded-[2.5rem] border border-indigo-500/20">
+              <Gamepad2 className="text-indigo-400" size={64} />
+            </div>
+          </div>
+          <div>
+            <h2 className="text-3xl font-black italic tracking-tighter text-gradient-cyan">CONTROLLER</h2>
+            <p className="text-[10px] text-muted uppercase tracking-[0.3em] mt-2">Distant Dominance</p>
+          </div>
+          <button onClick={() => setRole('controller')} className="btn-premium">SELECT MODE</button>
+        </div>
 
-    if (role === 'bridge') {
-      const intensity = getIntensityValue(powerLevelRef.current);
-      sendCommand(val, intensity);
-    }
-    updateRemote('pattern', val);
-  }
+        <div className="glass p-10 space-y-8 flex flex-col justify-center text-center border-purple-500/20">
+          <div className="flex justify-center">
+            <div className="p-5 bg-purple-500/10 rounded-[2.5rem] border border-purple-500/20">
+              <Zap className="text-purple-400" size={64} />
+            </div>
+          </div>
+          <div>
+            <h2 className="text-3xl font-black italic tracking-tighter text-gradient">BRIDGE</h2>
+            <p className="text-[10px] text-muted uppercase tracking-[0.3em] mt-2">Hardware Interface</p>
+          </div>
+          <button onClick={() => setRole('bridge')} className="btn-premium">SELECT MODE</button>
+        </div>
+      </motion.div>
+    </div>
+  );
+
+  const DashboardView = () => (
+    <div className="app-container">
+      <nav className="glass p-6 mb-8 flex justify-between items-center rounded-3xl border-purple-500/10">
+        <div className="flex items-center gap-4">
+          <div className="p-3 bg-purple-500/10 rounded-2xl border border-purple-500/20">
+            <Zap className="text-purple-400" size={20} />
+          </div>
+          <div>
+            <h1 className="text-xl font-black italic tracking-tighter">TRUEFORM.<span className="text-gradient">BRIDGE</span></h1>
+            <div className={`text-[9px] uppercase tracking-widest flex items-center gap-1 ${connected ? 'text-emerald-400' : 'text-rose-400'}`}>
+              <div className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+              {status}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-6">
+          <span className={`nav-link ${activeTab === 'controls' ? 'active' : ''}`} onClick={() => setActiveTab('controls')}>Controls</span>
+          <span className={`nav-link ${activeTab === 'gallery' ? 'active' : ''}`} onClick={() => setActiveTab('gallery')}>Vault</span>
+          <span className={`nav-link ${activeTab === 'chat' ? 'active' : ''}`} onClick={() => setActiveTab('chat')}>Sync</span>
+          <div className="w-10 h-10 rounded-full bg-purple-500/20 border border-purple-500/20 flex items-center justify-center cursor-pointer hover:bg-purple-500/30 transition-all" onClick={() => setIsPanic(true)}>
+            <Shield size={18} className="text-purple-300" />
+          </div>
+        </div>
+      </nav>
+
+      <main className="flex-1">
+        <AnimatePresence mode="wait">
+          {activeTab === 'controls' && <ControlsTab key="controls" />}
+          {activeTab === 'gallery' && <GalleryTab key="gallery" />}
+          {activeTab === 'chat' && <ChatTab key="chat" />}
+        </AnimatePresence>
+      </main>
+
+      {/* Notifications */}
+      <div className="fixed top-8 right-8 z-[100] flex flex-col gap-3 pointer-events-none">
+        <AnimatePresence>
+          {notifications.map(n => (
+            <motion.div
+              key={n.id}
+              initial={{ opacity: 0, x: 50, scale: 0.9 }}
+              animate={{ opacity: 1, x: 0, scale: 1 }}
+              exit={{ opacity: 0, x: 20, scale: 0.9 }}
+              className={`p-4 glass border-l-4 rounded-2xl flex items-center gap-4 min-w-[300px] shadow-2xl ${n.type === 'success' ? 'border-emerald-500' : n.type === 'error' ? 'border-rose-500' : 'border-indigo-500'
+                }`}
+            >
+              <div className="p-2 bg-white/5 rounded-xl">
+                {n.type === 'success' ? <Wifi className="text-emerald-400" size={18} /> : <Shield className="text-indigo-400" size={18} />}
+              </div>
+              <div>
+                <h4 className="text-[10px] uppercase font-bold text-muted tracking-widest">{n.title}</h4>
+                <p className="text-xs font-bold text-white">{n.msg}</p>
+              </div>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
+    </div>
+  );
+
+  const ControlsTab = () => (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -10 }}
+      className="space-y-8"
+    >
+      <div className="grid md:grid-cols-3 gap-8">
+        <div className="md:col-span-2 glass p-8 space-y-8">
+          <div className="flex justify-between items-center">
+            <h3 className="text-2xl font-black italic tracking-tighter">HAPTIC PULSE</h3>
+            <div className="flex gap-2">
+              <button className="btn-secondary text-[10px] px-4 py-2 uppercase tracking-widest font-black flex items-center gap-2">
+                <Mic size={14} /> Voice Sync Off
+              </button>
+            </div>
+          </div>
+
+          <div className="visualizer-container glass-premium rounded-[3rem] overflow-hidden">
+            <div className="absolute inset-0 bg-gradient-to-t from-purple-500/10 to-transparent pointer-events-none" />
+
+            {/* Silk Visualizer Component - simplified for now */}
+            <motion.div
+              animate={{
+                scale: [1, 1.2 + (powerLevel * 0.2), 1],
+                opacity: [0.3, 0.6 + (powerLevel * 0.1), 0.3]
+              }}
+              transition={{ duration: 2 - (powerLevel * 0.5), repeat: Infinity, ease: "easeInOut" }}
+              className="w-64 h-64 rounded-full bg-gradient-to-br from-purple-500 to-indigo-600 blur-3xl"
+            />
+
+            <div className="absolute bottom-8 flex flex-col items-center">
+              <span className="text-[10px] font-black text-muted uppercase tracking-[0.4em] mb-4">Intensity Spectrum</span>
+              <div className="flex gap-1 h-8 items-end">
+                {[...Array(20)].map((_, i) => (
+                  <motion.div
+                    key={i}
+                    animate={{ height: Math.random() * (20 + (powerLevel * 40)) }}
+                    className="w-1 bg-purple-500/40 rounded-full"
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex gap-4">
+            <button className="btn-premium flex-1 bg-gradient-to-r from-rose-500 to-red-600 shadow-rose-500/20" onClick={() => setPowerLevel(0)}>
+              EMERGENCY STOP
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-8">
+          <div className="glass p-8 space-y-6">
+            <h3 className="text-xl font-black italic tracking-tighter">SESSION STATUS</h3>
+            {!connected ? (
+              <div className="space-y-4">
+                <input
+                  type="text"
+                  value={deviceId}
+                  onChange={(e) => setDeviceId(e.target.value)}
+                  className="input-premium"
+                  placeholder="DEVICE ID"
+                />
+                <button onClick={connectWS} className="btn-premium w-full text-xs">INITIALIZE SESSION</button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {role === 'bridge' && !bleDevice.current && (
+                  <button onClick={connectBLE} className="btn-premium w-full bg-indigo-600 shadow-indigo-500/20">
+                    <Bluetooth size={18} /> LINK HARDWARE
+                  </button>
+                )}
+                {role === 'bridge' && (
+                  <button className="btn-secondary w-full text-[10px] font-black tracking-widest">
+                    COPY INVITE LINK
+                  </button>
+                )}
+                <div className="p-4 bg-white/5 rounded-2xl border border-white/5 space-y-2">
+                  <div className="flex justify-between text-[10px] font-bold text-muted uppercase tracking-widest">
+                    <span>Protocol</span>
+                    <span className="text-emerald-400">Secure</span>
+                  </div>
+                  <div className="flex justify-between text-[10px] font-bold text-muted uppercase tracking-widest">
+                    <span>Latency</span>
+                    <span className="text-indigo-400">22ms</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="glass p-8 space-y-6">
+            <h3 className="text-xl font-black italic tracking-tighter">QUICK PATTERNS</h3>
+            <div className="grid grid-cols-2 gap-3">
+              {PATTERNS.slice(0, 6).map(p => (
+                <button
+                  key={p.id}
+                  onClick={() => { setActivePattern(p.id); role === 'bridge' && sendCommand(p.id, getIntensityValue(powerLevel || 1)); }}
+                  className={`p-4 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-all ${activePattern === p.id
+                    ? 'bg-purple-500 border-purple-400 text-white shadow-lg shadow-purple-500/20'
+                    : 'bg-white/5 border-white/5 text-muted hover:border-purple-500/40'
+                    }`}
+                >
+                  {p.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+
+  const GalleryTab = () => (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -10 }}
+      className="space-y-8"
+    >
+      <div className="flex justify-between items-end mb-8">
+        <div>
+          <h2 className="text-4xl font-black italic tracking-tighter text-gradient">MEDIA VAULT</h2>
+          <p className="text-xs text-muted font-bold uppercase tracking-[0.4em] mt-2">Personal NSFW Collection</p>
+        </div>
+        <div className="flex gap-4">
+          <button
+            onClick={toggleNsfw}
+            className={`btn-secondary flex items-center gap-2 text-[10px] font-black tracking-widest ${showNsfw ? 'text-rose-400 border-rose-500/20' : ''}`}
+          >
+            {showNsfw ? <EyeOff size={14} /> : <Eye size={14} />} {showNsfw ? 'PROTECT' : 'REVEAL'}
+          </button>
+          <button className="btn-premium text-[10px] px-6 py-3">
+            <Plus size={14} /> ADD MEDIA
+          </button>
+        </div>
+      </div>
+
+      <div className="media-grid">
+        {mediaVault.map(item => (
+          <motion.div
+            key={item.id}
+            whileHover={{ y: -5 }}
+            className="media-card group cursor-pointer"
+          >
+            {item.type === 'video' ? (
+              <video src={item.url} muted loop playsInline onMouseEnter={e => e.target.play()} onMouseLeave={e => e.target.pause()} className={!showNsfw ? 'blur-3xl' : ''} />
+            ) : (
+              <img src={item.url} alt={item.label} className={!showNsfw ? 'blur-3xl' : ''} />
+            )}
+
+            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity p-6 flex flex-col justify-end">
+              <h4 className="text-sm font-black italic tracking-tighter text-white">{item.label}</h4>
+              <div className="flex justify-between items-center mt-2">
+                <div className="flex gap-2">
+                  <button className="p-2 bg-white/10 rounded-lg hover:bg-white/20 transition-all text-white"><Maximize2 size={14} /></button>
+                  <button className="p-2 bg-white/10 rounded-lg hover:bg-white/20 transition-all text-white"><Heart size={14} /></button>
+                </div>
+                {item.type === 'video' ? <Video size={14} className="text-white/40" /> : <ImageIcon size={14} className="text-white/40" />}
+              </div>
+            </div>
+            {item.nsfw && <div className="media-badge">NSFW</div>}
+          </motion.div>
+        ))}
+      </div>
+    </motion.div>
+  );
+
+  const ChatTab = () => (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -10 }}
+      className="grid md:grid-cols-12 gap-8 h-[600px]"
+    >
+      <div className="md:col-span-8 glass flex flex-col overflow-hidden">
+        <div className="p-6 border-b border-white/5 flex justify-between items-center bg-white/2">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-indigo-500/20 flex items-center justify-center">
+              <MessageSquare className="text-indigo-400" size={18} />
+            </div>
+            <div>
+              <h3 className="text-sm font-black italic tracking-tighter uppercase">SECURE CHAT</h3>
+              <p className="text-[9px] text-muted tracking-widest">{remoteIsTyping ? 'Partner is typing...' : 'Connected'}</p>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button className="btn-secondary py-2 px-3"><Trash2 size={14} /></button>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
+          {messages.map((m, i) => (
+            <div key={i} className={`flex ${m.user === role ? 'justify-end' : 'justify-start'}`}>
+              <div className={`max-w-[80%] p-4 rounded-2xl text-sm ${m.user === role
+                ? 'bg-purple-500 text-white rounded-tr-none'
+                : 'bg-white/5 border border-white/5 text-slate-200 rounded-tl-none'
+                }`}>
+                <div className="flex justify-between gap-4 mb-1">
+                  <span className="text-[8px] font-black uppercase opacity-60 tracking-widest">{m.user}</span>
+                  <span className="text-[8px] font-bold opacity-40">{m.timestamp}</span>
+                </div>
+                {m.text}
+              </div>
+            </div>
+          ))}
+          {remoteIsTyping && (
+            <div className="flex justify-start">
+              <div className="bg-white/5 p-4 rounded-2xl rounded-tl-none animate-pulse">
+                <div className="flex gap-1">
+                  <div className="w-1.5 h-1.5 bg-muted rounded-full animate-bounce" />
+                  <div className="w-1.5 h-1.5 bg-muted rounded-full animate-bounce [animation-delay:0.2s]" />
+                  <div className="w-1.5 h-1.5 bg-muted rounded-full animate-bounce [animation-delay:0.4s]" />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="p-6 bg-white/2 border-t border-white/5">
+          <div className="flex gap-4">
+            <input
+              value={inputText}
+              onChange={(e) => handleTyping(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+              placeholder="MESSAGE PARTNER..."
+              className="input-premium"
+            />
+            <button onClick={sendMessage} className="btn-premium px-6 py-4">
+              <Send size={18} />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="md:col-span-4 space-y-8">
+        <div className="glass p-8 space-y-6">
+          <h3 className="text-xl font-black italic tracking-tighter">REMOTE FEED</h3>
+          <div className="aspect-video bg-black rounded-3xl border border-white/5 overflow-hidden relative">
+            <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
+            {!remoteStream && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/80 text-center p-6">
+                <div className="space-y-4">
+                  <p className="text-[10px] font-black text-muted uppercase tracking-widest">Feed Encrypted</p>
+                  <button onClick={createOffer} className="btn-premium text-[10px] px-6 py-3">START CALL</button>
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="aspect-video bg-black rounded-3xl border border-white/5 overflow-hidden relative opacity-60">
+            <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
+            <div className="absolute bottom-4 left-4 text-[8px] font-black uppercase tracking-widest bg-black/60 px-2 py-1 rounded-md">Preview Feed</div>
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+
+  // --- Main Render Logic ---
+  if (!isAuthorized) return <AuthView />;
+  if (!role) return <SetupView />;
+  return <DashboardView />;
 }
 
 export default App;
