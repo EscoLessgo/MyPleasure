@@ -23,7 +23,8 @@ import {
   ExternalLink,
   ChevronRight,
   Info,
-  Trash2
+  Trash2,
+  Gamepad2
 } from 'lucide-react';
 import './App.css';
 import { PATTERNS } from './patterns';
@@ -42,11 +43,11 @@ const JOYHUB_TX_CHAR_UUID = '0000ffa1-0000-1000-8000-00805f9b34fb';
 
 function App() {
   // --- AUTH & SETUP ---
-  const [isSiteAuthorized, setIsSiteAuthorized] = useState(() => sessionStorage.getItem('tf_auth') === 'true');
+  const [isSiteAuthorized, setIsSiteAuthorized] = useState(() => sessionStorage.getItem('mp_auth') === 'true');
   const [sitePasscode, setSitePasscode] = useState('');
-  const [username, setUsername] = useState(sessionStorage.getItem('tf_username') || '');
+  const [username, setUsername] = useState(sessionStorage.getItem('mp_username') || '');
   const [role, setRole] = useState(null);
-  const [deviceId, setDeviceId] = useState('TNT-ALPHA-01');
+  const [deviceId, setDeviceId] = useState('MP-ALPHA-01');
 
   // --- SESSION STATE ---
   const [connected, setConnected] = useState(false);
@@ -73,20 +74,22 @@ function App() {
     const d = params.get('deviceId');
     if (d) setDeviceId(d);
     const p = params.get('passcode');
-    if (p === '6969') { setIsSiteAuthorized(true); sessionStorage.setItem('tf_auth', 'true'); }
+    if (p === '6969') { setIsSiteAuthorized(true); sessionStorage.setItem('mp_auth', 'true'); }
   }, []);
 
   const connectWS = () => {
     if (!username) return alert('Username required.');
-    sessionStorage.setItem('tf_username', username);
+    sessionStorage.setItem('mp_username', username);
 
     if (wsRef.current) wsRef.current.close();
 
-    const socket = new WebSocket(`${WS_URL}?deviceId=${deviceId}&type=${role}&username=${encodeURIComponent(username)}`);
+    // Fallback role to controller if not selected but somehow clicked
+    const finalRole = role || 'controller';
+    const socket = new WebSocket(`${WS_URL}?deviceId=${deviceId}&type=${finalRole}&username=${encodeURIComponent(username)}`);
 
     socket.onopen = () => {
       setConnected(true);
-      if (role === 'controller') setHandshakeStatus('pending');
+      if (finalRole === 'controller') setHandshakeStatus('pending');
       else setHandshakeStatus('active');
       addLog(`Connected to Tunnel: ${deviceId}`);
     };
@@ -171,10 +174,10 @@ function App() {
       <div className="lobby-overlay">
         <div className="setup-gate animate-intimate">
           <Fingerprint className="text-secondary" size={80} />
-          <div className="tnt-logo purple">TNT <span>SYNC</span></div>
-          <p className="tnt-subtitle">ENTER THE VOID PROTOCOL TO ACCESS THE BRIDGE INTERFACE.</p>
-          <form onSubmit={(e) => { e.preventDefault(); if (sitePasscode === '6969') { setIsSiteAuthorized(true); sessionStorage.setItem('tf_auth', 'true'); } else alert('Invalid Access Key'); }} className="w-full space-y-4">
-            <input type="password" placeholder="ACCESS KEY" value={sitePasscode} onChange={e => setSitePasscode(e.target.value)} className="input-tnt" />
+          <div className="mp-logo purple">MY<span>PLEASURE</span></div>
+          <p className="mp-subtitle">ENTER THE VOID PROTOCOL TO ACCESS THE BRIDGE INTERFACE.</p>
+          <form onSubmit={(e) => { e.preventDefault(); if (sitePasscode === '6969') { setIsSiteAuthorized(true); sessionStorage.setItem('mp_auth', 'true'); } else alert('Invalid Access Key'); }} className="w-full space-y-4">
+            <input type="password" placeholder="ACCESS KEY" value={sitePasscode} onChange={e => setSitePasscode(e.target.value)} className="input-mp" />
             <button type="submit" className="btn-climax-huge w-full">AUTHENTICATE</button>
           </form>
         </div>
@@ -187,27 +190,27 @@ function App() {
     return (
       <div className="lobby-overlay">
         <div className="setup-gate">
-          <div className="tnt-logo">TNT <span>SYNC</span></div>
-          <p className="tnt-subtitle">PREMIUM REAL-TIME TOY CONTROL FOR INTIMACY WITHOUT BOUNDARIES.</p>
+          <div className="mp-logo">MY<span>PLEASURE</span></div>
+          <p className="mp-subtitle">PREMIUM REAL-TIME TOY CONTROL FOR INTIMACY WITHOUT BOUNDARIES.</p>
 
           <div className="w-full space-y-6">
             <div className="space-y-2">
               <label className="text-[10px] font-black text-dim tracking-widest uppercase">Select Identity</label>
               <div className="grid grid-cols-2 gap-4">
                 <button onClick={() => setRole('controller')} className={`glass p-6 rounded-2xl border ${role === 'controller' ? 'border-primary bg-primary/10' : 'border-white/5 opacity-50'}`}>
-                  <Gamepad2 className="mx-auto mb-2" />
+                  <Gamepad2 className="mx-auto mb-2 text-primary" />
                   <div className="text-[10px] font-black uppercase">Controller</div>
                 </button>
                 <button onClick={() => setRole('bridge')} className={`glass p-6 rounded-2xl border ${role === 'bridge' ? 'border-secondary bg-secondary/10' : 'border-white/5 opacity-50'}`}>
-                  <Activity className="mx-auto mb-2" />
+                  <Activity className="mx-auto mb-2 text-secondary" />
                   <div className="text-[10px] font-black uppercase">Host</div>
                 </button>
               </div>
             </div>
 
             <div className="space-y-4">
-              <input type="text" placeholder="DISPLAY NAME" value={username} onChange={e => setUsername(e.target.value)} className="input-tnt" />
-              {role === 'controller' && <input type="text" placeholder="SESSION ID" value={deviceId} onChange={e => setDeviceId(e.target.value)} className="input-tnt" />}
+              <input type="text" placeholder="DISPLAY NAME" value={username} onChange={e => setUsername(e.target.value)} className="input-mp" />
+              {role === 'controller' && <input type="text" placeholder="SESSION ID" value={deviceId} onChange={e => setDeviceId(e.target.value)} className="input-mp" />}
               <button onClick={connectWS} className="btn-climax-huge w-full">ESTABLISH SYNC</button>
             </div>
           </div>
@@ -222,15 +225,15 @@ function App() {
       <div className="lobby-overlay">
         <div className="setup-gate">
           <div className="status-circle shake-it">
-            <div className="circle-content">🛡️</div>
+            <div className="circle-content">🌸</div>
           </div>
-          <h2 className="tnt-logo"><span>WAITING</span></h2>
-          <p className="tnt-subtitle">THE HOST HAS BEEN NOTIFIED. PLEASE WAIT FOR HANDSHAKE CONFIRMATION.</p>
+          <h2 className="mp-logo"><span>WAITING</span></h2>
+          <p className="mp-subtitle">THE HOST HAS BEEN NOTIFIED. PLEASE WAIT FOR HANDSHAKE CONFIRMATION.</p>
           <div className="w-full p-6 glass rounded-2xl border-white/5">
             <div className="text-[10px] font-black text-dim tracking-widest">SESSION: {deviceId}</div>
-            <div className="text-[10px] font-black text-primary tracking-widest">IDENTITY: {username}</div>
+            <div className="text-[10px] font-black text-primary tracking-widest uppercase">IDENTITY: {username}</div>
           </div>
-          <button onClick={() => setConnected(false)} className="btn-tnt-primary bg-zinc-800">CANCEL REQUEST</button>
+          <button onClick={() => { if (wsRef.current) wsRef.current.close(); setConnected(false); }} className="btn-mp-primary bg-zinc-800">CANCEL REQUEST</button>
         </div>
       </div>
     );
@@ -245,7 +248,7 @@ function App() {
           <div className="w-10 h-10 bg-primary/20 rounded-xl flex items-center justify-center border border-primary/30">
             <Radio className="text-primary animate-pulse" size={20} />
           </div>
-          <div className="tnt-logo text-3xl mb-0">TNT <span>SYNC</span></div>
+          <div className="mp-logo text-3xl mb-0">MY<span>PLEASURE</span></div>
         </div>
         <div className="flex items-center gap-6">
           <div className="hidden md:flex flex-col items-end">
@@ -256,17 +259,17 @@ function App() {
         </div>
       </nav>
 
-      <div className="tnt-grid">
+      <div className="mp-grid">
         {/* Left Column: Device & Status */}
         <div className="space-y-6">
-          <div className="tnt-card status-engaged">
+          <div className="mp-card status-engaged">
             <div className="flex justify-between items-center">
               <Shield className="text-emerald-500" size={24} />
-              <div className="tnt-badge">ENGAGED</div>
+              <div className="mp-badge">ENGAGED</div>
             </div>
             <div className="text-center">
               <h2 className="text-2xl font-black italic uppercase font-syne">1 DEVICE SYNCED</h2>
-              <p className="text-[9px] text-dim font-black tracking-widest uppercase mt-1">PRIMARY VIBRATOR ACTIVE</p>
+              <p className="text-[9px] text-dim font-black tracking-widest uppercase mt-1">PRIMARY INTERFACE ACTIVE</p>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <button className="glass py-4 rounded-xl border-white/5 hover:border-emerald-500/30 transition-all"><ThumbsUp size={20} className="mx-auto text-emerald-500" /></button>
@@ -275,7 +278,7 @@ function App() {
             <button onClick={triggerClimax} className="btn-climax-huge">🔥 I'M GONNA CUM! 🍬</button>
           </div>
 
-          <div className="tnt-card">
+          <div className="mp-card">
             <div className="status-circle">
               <div className="circle-content">🌸</div>
             </div>
@@ -285,7 +288,7 @@ function App() {
             </div>
           </div>
 
-          <div className="tnt-card p-6">
+          <div className="mp-card p-6">
             <div className="text-[9px] font-black text-dim tracking-widest uppercase mb-4">REQUEST LOBBY</div>
             <div className="space-y-3">
               {participants.filter(p => p.status === 'pending').length === 0 ? (
@@ -315,19 +318,19 @@ function App() {
               <Volume2 className="text-dim" />
             </div>
             <h3>MEDIA STAGE OFFLINE</h3>
-            <p className="text-[10px] font-black text-dim/50 tracking-[0.4em] uppercase">CLICK TO BROADCAST SESSION MEDIA</p>
+            <p className="text-[10px] font-black text-dim/50 tracking-[0.4em] uppercase">BROADCAST SESSION MEDIA</p>
           </div>
 
-          <div className="tnt-card p-0 h-[380px] flex flex-col">
+          <div className="mp-card p-0 h-[380px] flex flex-col">
             <div className="p-4 border-b border-white/5 flex justify-between items-center">
               <div className="text-[9px] font-black text-dim tracking-[0.3em] uppercase">RECENT WHISPERS</div>
-              <div className="tnt-badge bg-primary/10 text-primary">SESSION LIVE</div>
+              <div className="mp-badge bg-primary/10 text-primary">SESSION LIVE</div>
             </div>
             <div className="flex-1 p-6 overflow-y-auto space-y-4 scroll-smooth">
               {messages.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center space-y-4 opacity-20">
                   <MessageSquare size={32} />
-                  <div className="text-[10px] font-black tracking-widest uppercase">SILENCE IS WAITING TO BE BROKEN...</div>
+                  <div className="text-[10px] font-black tracking-widest uppercase text-center">SILENCE IS WAITING TO BE BROKEN...</div>
                 </div>
               ) : (
                 messages.map((m, i) => (
@@ -344,7 +347,7 @@ function App() {
               <div className="whisper-box">
                 <input
                   type="text"
-                  placeholder="WHISPER BACK TO YOUR PARTNER..."
+                  placeholder="WHISPER TO YOUR PARTNER..."
                   className="whisper-input"
                   value={inputText}
                   onChange={e => setInputText(e.target.value)}
@@ -360,19 +363,19 @@ function App() {
 
         {/* Right Column: Controls & Link */}
         <div className="space-y-6">
-          <div className="tnt-card">
+          <div className="mp-card">
             <div className="text-[9px] font-black text-dim tracking-[0.3em] uppercase">PARTNER LINK</div>
             <div className="bg-black/50 p-4 rounded-xl border border-white/5 text-[10px] font-mono text-primary text-truncate">{window.location.origin}/?deviceId={deviceId}</div>
             <button
               onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/?deviceId=${deviceId}`); addLog('✓ Portal coordinates copied'); }}
-              className="btn-tnt-primary bg-zinc-800 text-white"
+              className="btn-mp-primary bg-zinc-800 text-white"
             >
               COPY LINK
             </button>
             <button onClick={() => triggerShake()} className="text-[9px] font-black text-dim hover:text-primary transition-all uppercase tracking-widest">⚡ SYNC TEST</button>
           </div>
 
-          <div className="tnt-card">
+          <div className="mp-card">
             <div className="text-[9px] font-black text-dim tracking-[0.3em] uppercase">OVERRIDES</div>
             <div className="space-y-6">
               <div className="space-y-3">
@@ -391,7 +394,7 @@ function App() {
             </div>
           </div>
 
-          <div className="tnt-card border-rose-500/20">
+          <div className="mp-card border-rose-500/20">
             <div className="text-[9px] font-black text-dim tracking-[0.3em] uppercase">SESSION CONTROL</div>
             <button onClick={() => window.location.reload()} className="w-full py-4 bg-rose-500/10 border border-rose-500/30 text-rose-500 rounded-xl text-[9px] font-black tracking-widest uppercase hover:bg-rose-500 hover:text-white transition-all">DESTROY SESSION & LINK</button>
           </div>
@@ -410,11 +413,11 @@ function App() {
         <div className="grid md:grid-cols-2 gap-8">
           <div className="p-6 glass rounded-2xl border-white/5 space-y-2">
             <div className="flex items-center gap-2 text-[10px] font-black text-emerald-400 uppercase">✓ End-to-End Encryption</div>
-            <p className="text-[9px] text-dim/60 leading-relaxed">EACH CONNECTION IS STRICTLY SECURED VIA TLS/SSL. HANDSHAKE CODES ARE UNIQUE PER SESSION AND DESTROYED UPON DISCONNECT.</p>
+            <p className="text-[9px] text-dim/60 leading-relaxed uppercase">EACH CONNECTION IS STRICTLY SECURED VIA TLS/SSL. HANDSHAKE CODES ARE UNIQUE PER SESSION AND DESTROYED UPON DISCONNECT.</p>
           </div>
           <div className="p-6 glass rounded-2xl border-white/5 space-y-2">
             <div className="flex items-center gap-2 text-[10px] font-black text-emerald-400 uppercase">✓ TOS COMPLIANCE</div>
-            <p className="text-[9px] text-dim/60 leading-relaxed">TNT SYNC OPERATES IN FULL COMPLIANCE WITH LOVENSE DEVELOPER TERMS. WE NEVER STORE PERSONAL BIOMETRIC DATA OR VOICE RECORDINGS.</p>
+            <p className="text-[9px] text-dim/60 leading-relaxed uppercase">MYPLEASURE OPERATES IN FULL COMPLIANCE WITH LOVENSE DEVELOPER TERMS. WE NEVER STORE PERSONAL BIOMETRIC DATA OR VOICE RECORDINGS.</p>
           </div>
         </div>
       </div>

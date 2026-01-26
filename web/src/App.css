@@ -35,12 +35,12 @@ body {
   background-attachment: fixed;
 }
 
-/* TNT Typography */
+/* MyPleasure Typography */
 .font-syne {
   font-family: 'Syne', sans-serif;
 }
 
-.tnt-logo {
+.mp-logo {
   font-family: 'Syne', sans-serif;
   font-weight: 800;
   font-style: italic;
@@ -51,15 +51,15 @@ body {
   margin-bottom: 0.5rem;
 }
 
-.tnt-logo span {
+.mp-logo span {
   color: var(--text-main);
 }
 
-.tnt-logo.purple {
+.mp-logo.purple {
   color: var(--primary);
 }
 
-.tnt-subtitle {
+.mp-subtitle {
   font-size: 0.6rem;
   font-weight: 900;
   text-transform: uppercase;
@@ -80,7 +80,7 @@ body {
   gap: 2rem;
 }
 
-.tnt-grid {
+.mp-grid {
   display: grid;
   grid-template-columns: 320px 1fr 320px;
   gap: 1.5rem;
@@ -88,13 +88,13 @@ body {
 }
 
 @media (max-width: 1200px) {
-  .tnt-grid {
+  .mp-grid {
     grid-template-columns: 1fr;
   }
 }
 
 /* Component Styling */
-.tnt-card {
+.mp-card {
   background: var(--bg-card);
   border: 1px solid var(--border-light);
   border-radius: 2rem;
@@ -107,16 +107,16 @@ body {
   overflow: hidden;
 }
 
-.tnt-card:hover {
+.mp-card:hover {
   border-color: var(--border-glow);
 }
 
-.tnt-card.status-engaged {
+.mp-card.status-engaged {
   border-color: rgba(16, 185, 129, 0.2);
   box-shadow: 0 0 40px rgba(16, 185, 129, 0.05);
 }
 
-.tnt-badge {
+.mp-badge {
   background: rgba(16, 185, 129, 0.1);
   color: #10b981;
   font-size: 0.6rem;
@@ -128,7 +128,7 @@ body {
 }
 
 /* Buttons */
-.btn-tnt-primary {
+.btn-mp-primary {
   background: var(--primary);
   color: white;
   border: none;
@@ -141,7 +141,7 @@ body {
   transition: 0.3s;
 }
 
-.btn-tnt-primary:hover {
+.btn-mp-primary:hover {
   transform: translateY(-2px);
   filter: brightness(1.2);
 }
@@ -275,7 +275,7 @@ body {
   align-items: center;
 }
 
-.input-tnt {
+.input-mp {
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.1);
   padding: 1.25rem;
@@ -287,7 +287,7 @@ body {
   font-weight: bold;
 }
 
-.input-tnt:focus {
+.input-mp:focus {
   border-color: var(--primary);
   outline: none;
 }
@@ -322,7 +322,7 @@ body {
 }
 
 /* Animation */
-@keyframes shake-tnt {
+@keyframes shake-mp {
   0% {
     transform: translate(1px, 1px) rotate(0deg);
   }
@@ -341,5 +341,25 @@ body {
 }
 
 .shake-it {
-  animation: shake-tnt 0.5s infinite linear;
+  animation: shake-mp 0.5s infinite linear;
+}
+
+@keyframes pulse-intimate {
+
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.85;
+    filter: drop-shadow(0 0 15px rgba(168, 85, 247, 0.2));
+  }
+
+  50% {
+    transform: scale(1.03);
+    opacity: 1;
+    filter: drop-shadow(0 0 25px rgba(168, 85, 247, 0.4));
+  }
+}
+
+.animate-intimate {
+  animation: pulse-intimate 3s infinite ease-in-out;
 }
