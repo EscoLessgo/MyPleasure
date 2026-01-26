@@ -42,11 +42,11 @@ const JOYHUB_SERVICE_UUID = '0000ffa0-0000-1000-8000-00805f9b34fb';
 const JOYHUB_TX_CHAR_UUID = '0000ffa1-0000-1000-8000-00805f9b34fb';
 
 const REACTION_ASSETS = {
-  idle: 'https://images.unsplash.com/photo-1550684848-fac1c5b4e853?q=80&w=1000&auto=format&fit=crop',
-  low: 'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?q=80&w=1000&auto=format&fit=crop',
-  medium: 'https://images.unsplash.com/photo-1529626455594-4ff0802cfb7e?q=80&w=1000&auto=format&fit=crop',
-  high: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?q=80&w=1000&auto=format&fit=crop',
-  climax: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=1000&auto=format&fit=crop'
+  idle: 'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?q=80&w=1000&auto=format&fit=crop', // Deep moody fashion
+  low: 'https://images.unsplash.com/photo-1549060279-7e168fcee0c2?q=80&w=1000&auto=format&fit=crop',
+  medium: 'https://images.unsplash.com/photo-1509631179647-0177331693ae?q=80&w=1000&auto=format&fit=crop',
+  high: 'https://images.unsplash.com/photo-1539109136881-3be0616acf4b?q=80&w=1000&auto=format&fit=crop',
+  climax: 'https://images.unsplash.com/photo-1490481651871-ab68de25d43d?q=80&w=1000&auto=format&fit=crop'
 };
 
 function App() {
@@ -456,13 +456,13 @@ function App() {
         </div>
 
         <div className="space-y-8">
-          <div className="glass p-10 space-y-8">
+          <div className="glass p-12 space-y-10">
             <div className="flex items-center gap-4">
               <Radio className="text-cyan-400" size={24} />
               <h2 className="text-xl font-black font-syne italic tracking-tighter uppercase">LOCAL NODE</h2>
             </div>
 
-            <div className="space-y-4">
+            <div className="space-y-6">
               <div className="relative">
                 <div className="absolute left-6 top-1/2 -translate-y-1/2 text-white/20"><Cpu size={18} /></div>
                 <input type="text" value={deviceId} onChange={e => setDeviceId(e.target.value)} disabled={connected} className="input-premium w-full pl-16 text-xs font-black tracking-widest uppercase" />
@@ -471,19 +471,19 @@ function App() {
                 {connected ? <RefreshCw className="animate-spin-slow" size={16} /> : <Zap size={16} />}
                 {connected ? 'RE-SYNC CORE' : 'ESTABLISH TUNNEL'}
               </button>
-            </div>
 
-            {role === 'bridge' && (
-              <div className="space-y-4 pt-4">
-                <button onClick={connectBLE} className={`w-full py-6 glass rounded-[1.5rem] flex items-center justify-center gap-4 group transition-all ${bleDevice ? 'bg-emerald-500/10 border-emerald-500/40' : 'hover:border-white/20'}`}>
-                  <Bluetooth size={24} className={bleDevice ? 'text-emerald-400' : 'text-white/20'} />
-                  <span className="uppercase font-black text-xs tracking-[0.2em]">{bleDevice ? 'LINK ACTIVE' : 'BIND HARDWARE'}</span>
-                </button>
-                <button onClick={copyInvite} className="w-full py-4 glass-premium rounded-[1.25rem] text-cyan-400 text-[10px] font-black tracking-widest flex items-center justify-center gap-3 hover:bg-cyan-400/5 transition-all group">
-                  <Copy size={16} className="group-hover:rotate-12 transition-transform" /> SHARE PORTAL ENTRY
-                </button>
-              </div>
-            )}
+              {(role === 'bridge' || connected) && (
+                <div className="grid grid-cols-1 gap-4 pt-4">
+                  <button onClick={connectBLE} className={`w-full py-5 glass rounded-2xl flex items-center justify-center gap-4 group transition-all ${bleDevice ? 'bg-emerald-500/10 border-emerald-500/40' : 'hover:border-white/20'}`}>
+                    <Bluetooth size={20} className={bleDevice ? 'text-emerald-400' : 'text-white/20'} />
+                    <span className="uppercase font-black text-[10px] tracking-[0.2em]">{bleDevice ? 'LINK ACTIVE' : 'BIND HARDWARE'}</span>
+                  </button>
+                  <button onClick={copyInvite} className="w-full py-5 glass-premium rounded-2xl text-cyan-400 text-[10px] font-black tracking-widest flex items-center justify-center gap-3 hover:bg-cyan-400/5 transition-all group">
+                    <Copy size={16} className="group-hover:rotate-12 transition-transform" /> SHARE PORTAL ENTRY
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="glass p-10 space-y-6">
