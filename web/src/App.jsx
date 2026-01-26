@@ -5,20 +5,14 @@ import {
   Gamepad2,
   Zap,
   Bluetooth,
-  Mic,
-  MicOff,
-  Heart,
   Activity,
+  Heart,
   Trash2,
-  Send,
   Copy,
   LayoutGrid,
   Terminal,
-  RefreshCw,
   LogOut,
-  XCircle,
   Users,
-  Clock,
   Radio,
   ThumbsUp,
   ThumbsDown,
@@ -26,22 +20,29 @@ import {
   Trophy,
   Target,
   Flame,
-  Volume2
+  Volume2,
+  Signal,
+  Cpu,
+  Fingerprint
 } from 'lucide-react';
 import './App.css';
 import { PATTERNS } from './patterns';
 
-const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-const host = window.location.host.includes('5173') ? 'localhost:8080' : window.location.host;
-const WS_URL = `${protocol}//${host}`;
+const getWSUrl = () => {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  // In dev (Vite), connect to local node server. In prod, connect to same host.
+  if (window.location.port === '5173' || window.location.hostname === 'localhost') {
+    return `${protocol}//${window.location.hostname}:8080`;
+  }
+  return `${protocol}//${window.location.host}`;
+};
 
+const WS_URL = getWSUrl();
 const JOYHUB_SERVICE_UUID = '0000ffa0-0000-1000-8000-00805f9b34fb';
 const JOYHUB_TX_CHAR_UUID = '0000ffa1-0000-1000-8000-00805f9b34fb';
 
-// Suggestive character reactions placeholder paths
-// User can replace these with their own live-action assets
 const REACTION_ASSETS = {
-  idle: 'https://images.unsplash.com/photo-1550684848-fac1c5b4e853?q=80&w=1000&auto=format&fit=crop', // Suggestive dark aesthetic
+  idle: 'https://images.unsplash.com/photo-1550684848-fac1c5b4e853?q=80&w=1000&auto=format&fit=crop',
   low: 'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?q=80&w=1000&auto=format&fit=crop',
   medium: 'https://images.unsplash.com/photo-1529626455594-4ff0802cfb7e?q=80&w=1000&auto=format&fit=crop',
   high: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?q=80&w=1000&auto=format&fit=crop',
@@ -51,84 +52,113 @@ const REACTION_ASSETS = {
 function App() {
   const [activeTab, setActiveTab] = useState('controls');
   const [role, setRole] = useState(null);
-  const [deviceId, setDeviceId] = useState('TrueForm-1');
+  const [deviceId, setDeviceId] = useState('TrueForm-Session-1');
   const [connected, setConnected] = useState(false);
-  const [status, setStatus] = useState('Disconnected');
+  const [status, setStatus] = useState('Offline');
   const [speed, setSpeed] = useState(0);
   const [activePattern, setActivePattern] = useState(1);
   const [logs, setLogs] = useState([]);
   const [participants, setParticipants] = useState([]);
-  const [isMicSync, setIsMicSync] = useState(false);
   const [isAuthorized, setIsAuthorized] = useState(() => sessionStorage.getItem('tf_auth') === 'true');
   const [passcode, setPasscode] = useState('');
   const [isPanic, setIsPanic] = useState(false);
   const [reactions, setReactions] = useState([]);
 
-  // WebSocket and BLE State
   const [ws, setWs] = useState(null);
   const wsRef = useRef(null);
   const [bleDevice, setBleDevice] = useState(null);
   const bleCharsRef = useRef([]);
 
-  // TNT Sync State
   const [inputText, setInputText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [remoteIsTyping, setRemoteIsTyping] = useState(false);
   const typingTimeoutRef = useRef(null);
   const lastPulseRef = useRef(0);
 
-  // Audio Processing Refs
-  const audioCtxRef = useRef(null);
-  const analystRef = useRef(null);
-  const streamRef = useRef(null);
-
-  // Game State
-  const [gameState, setGameState] = useState({ active: false, score: 0, level: 1 });
+  const [gameState, setGameState] = useState({ active: false, score: 0 });
 
   const addLog = (msg) => {
-    setLogs(prev => [msg, ...prev].slice(0, 50));
+    const timestamp = new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    setLogs(prev => [`[${timestamp}] ${msg}`, ...prev].slice(0, 30));
   };
 
   const spawnReaction = (emoji) => {
     const id = Date.now();
     setReactions(prev => [...prev, { id, emoji, x: Math.random() * 80 + 10, y: Math.random() * 50 + 20 }]);
-    setTimeout(() => setReactions(prev => prev.filter(r => r.id !== id)), 2000);
+    setTimeout(() => setReactions(prev => prev.filter(r => r.id !== id)), 1500);
   };
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const r = params.get('role');
-    if (r === 'bridge' || r === 'controller') setRole(r);
+    if (r) setRole(r);
     const id = params.get('deviceId');
     if (id) setDeviceId(id);
     const p = params.get('passcode');
-    if (p === '6969') { setIsAuthorized(true); sessionStorage.setItem('tf_auth', 'true'); }
+    if (p === '6969') {
+      setIsAuthorized(true);
+      sessionStorage.setItem('tf_auth', 'true');
+    }
   }, []);
 
   const connectWS = () => {
     if (ws) ws.close();
+    addLog(`Initiating handshake with ${WS_URL}...`);
     const socket = new WebSocket(`${WS_URL}?deviceId=${deviceId}&type=${role}`);
-    socket.onopen = () => { setStatus('Connected'); setConnected(true); addLog('✓ Secure Tunnel Open'); };
-    socket.onmessage = (event) => {
-      const msg = JSON.parse(event.data);
-      handleRemoteMessage(msg);
+
+    socket.onopen = () => {
+      setStatus('Online');
+      setConnected(true);
+      addLog('✓ Synced to TrueForm Core');
+      if (role === 'bridge') addLog('Waiting for controller signal...');
     };
-    socket.onclose = () => { setStatus('Disconnected'); setConnected(false); setParticipants([]); };
+
+    socket.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        handleRemoteMessage(msg);
+      } catch (e) {
+        addLog(`! Data corruption detected`);
+      }
+    };
+
+    socket.onclose = () => {
+      setStatus('Offline');
+      setConnected(false);
+      setParticipants([]);
+      addLog('! Connection Terminated');
+    };
+
+    socket.onerror = (err) => {
+      addLog('X Protocol Error: Handshake failed');
+    };
+
     setWs(socket);
     wsRef.current = socket;
   };
 
   const handleRemoteMessage = (msg) => {
-    if (msg.action === 'room-state') { setParticipants(msg.value); return; }
-    if (msg.action === 'reaction') { spawnReaction(msg.value); return; }
+    if (msg.action === 'room-state') {
+      setParticipants(msg.value);
+      return;
+    }
+    if (msg.action === 'reaction') {
+      spawnReaction(msg.value);
+      return;
+    }
 
     if (role === 'bridge') {
-      if (msg.action === 'speed') { setSpeed(msg.value); sendBLECommand(activePattern, msg.value); }
-      else if (msg.action === 'pattern') { setActivePattern(msg.value); sendBLECommand(msg.value, speed || 50); }
-      else if (msg.action === 'pulse') { sendBLECommand(activePattern, msg.value); }
-      else if (msg.action === 'typing') { setRemoteIsTyping(msg.value); }
-    } else if (role === 'controller') {
-      if (msg.action === 'status') addLog(`📡 Bridge: ${msg.value}`);
+      if (msg.action === 'speed') {
+        setSpeed(msg.value);
+        sendBLECommand(activePattern, msg.value);
+      } else if (msg.action === 'pattern') {
+        setActivePattern(msg.value);
+        sendBLECommand(msg.value, speed || 50);
+      } else if (msg.action === 'pulse') {
+        sendBLECommand(activePattern, msg.value);
+      } else if (msg.action === 'typing') {
+        setRemoteIsTyping(msg.value);
+      }
     }
   };
 
@@ -143,9 +173,11 @@ function App() {
       const txChar = await service.getCharacteristic(JOYHUB_TX_CHAR_UUID);
       bleCharsRef.current = [txChar];
       setBleDevice(device);
-      addLog('✅ Hardware Linked');
-      if (ws) ws.send(JSON.stringify({ action: 'status', value: 'Bridge Online' }));
-    } catch (err) { addLog(`❌ BLE Error: ${err.message}`); }
+      addLog('✓ Neural Link established');
+      if (ws) ws.send(JSON.stringify({ action: 'status', value: 'Bridge Ready' }));
+    } catch (err) {
+      addLog(`X Link Interrupted: ${err.message}`);
+    }
   };
 
   const sendBLECommand = async (mode, rawSpeed) => {
@@ -153,13 +185,17 @@ function App() {
     const intensity = Math.min(255, Math.floor((rawSpeed / 100) * 255));
     const finalMode = rawSpeed === 0 ? 0 : mode;
     const cmd = new Uint8Array([0xa0, 0x0c, 0x00, 0x00, finalMode, intensity]);
-    try { await bleCharsRef.current[0].writeValue(cmd); } catch (err) { }
+    try {
+      await bleCharsRef.current[0].writeValue(cmd);
+    } catch (err) { }
   };
 
   const updateSpeed = (val) => {
     const intVal = parseInt(val);
     setSpeed(intVal);
-    if (ws && role === 'controller') ws.send(JSON.stringify({ action: 'speed', value: intVal }));
+    if (ws && role === 'controller') {
+      ws.send(JSON.stringify({ action: 'speed', value: intVal }));
+    }
     if (role === 'bridge') sendBLECommand(activePattern, intVal);
   };
 
@@ -169,20 +205,35 @@ function App() {
       const now = Date.now();
       if (now - lastPulseRef.current > 120) {
         ws.send(JSON.stringify({ action: 'pulse', value: 80 }));
-        if (!isTyping) { setIsTyping(true); ws.send(JSON.stringify({ action: 'typing', value: true })); }
+        if (!isTyping) {
+          setIsTyping(true);
+          ws.send(JSON.stringify({ action: 'typing', value: true }));
+        }
         clearTimeout(typingTimeoutRef.current);
-        typingTimeoutRef.current = setTimeout(() => { setIsTyping(false); ws.send(JSON.stringify({ action: 'typing', value: false })); }, 2000);
+        typingTimeoutRef.current = setTimeout(() => {
+          setIsTyping(false);
+          ws.send(JSON.stringify({ action: 'typing', value: false }));
+        }, 2000);
         lastPulseRef.current = now;
       }
     }
   };
 
-  // --- Zen Game Logic ---
-  const handleZenClick = () => {
-    if (!gameState.active) return;
-    setGameState(prev => ({ ...prev, score: prev.score + 10 }));
-    if (ws && role === 'controller') ws.send(JSON.stringify({ action: 'pulse', value: 100 }));
-    spawnReaction('🔥');
+  const copyInvite = () => {
+    const url = `${window.location.origin}/?deviceId=${deviceId}&passcode=6969&role=controller`;
+    navigator.clipboard.writeText(url);
+    addLog('✓ Portal coordinates copied');
+  };
+
+  const handleAuth = (e) => {
+    if (e) e.preventDefault();
+    if (passcode === '6969') {
+      setIsAuthorized(true);
+      sessionStorage.setItem('tf_auth', 'true');
+      addLog('Identity Verified');
+    } else {
+      addLog('Access Denied: Invalid Key');
+    }
   };
 
   const getReactionImage = () => {
@@ -195,33 +246,92 @@ function App() {
 
   if (!isAuthorized) {
     return (
-      <div className="auth-view flex items-center justify-center min-h-screen p-6">
-        <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="glass-premium p-12 max-w-sm w-full text-center space-y-8">
-          <div className="flex justify-center"><Shield className="text-purple-400" size={48} /></div>
-          <h2 className="text-3xl font-black italic tracking-tighter text-gradient">IDENTIFY</h2>
-          <input type="password" placeholder="KEY CODE" className="input-premium text-center tracking-[0.5em] font-black" value={passcode} onChange={e => setPasscode(e.target.value)} onKeyPress={e => e.key === 'Enter' && (passcode === '6969' && (setIsAuthorized(true), sessionStorage.setItem('tf_auth', 'true')))} />
-          <button onClick={() => passcode === '6969' ? (setIsAuthorized(true), sessionStorage.setItem('tf_auth', 'true')) : addLog('Denied')} className="btn-premium w-full uppercase">Bypass</button>
+      <div className="auth-view flex items-center justify-center min-h-screen relative overflow-hidden">
+        {/* Ambient background particles */}
+        {[...Array(20)].map((_, i) => (
+          <motion.div
+            key={i}
+            className="absolute w-1 h-1 bg-purple-500/20 rounded-full"
+            animate={{
+              y: [0, -1000],
+              opacity: [0, 1, 0],
+            }}
+            transition={{
+              duration: Math.random() * 10 + 10,
+              repeat: Infinity,
+              delay: Math.random() * 5,
+            }}
+            style={{
+              left: `${Math.random() * 100}%`,
+              bottom: '-5%'
+            }}
+          />
+        ))}
+
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass p-12 max-w-sm w-full text-center space-y-12 border-white/5 relative z-10">
+          <div className="relative">
+            <Fingerprint className="text-purple-400 mx-auto" size={80} />
+            <motion.div
+              animate={{ top: ['0%', '100%', '0%'] }}
+              transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
+              className="absolute inset-x-0 h-0.5 bg-purple-500 shadow-[0_0_15px_rgba(168,85,247,0.8)] z-20"
+            />
+            <motion.div animate={{ opacity: [0, 1, 0] }} transition={{ repeat: Infinity, duration: 2 }} className="absolute inset-0 bg-purple-500/20 blur-2xl" />
+          </div>
+          <div className="space-y-4">
+            <h2 className="text-4xl font-black italic tracking-tighter uppercase font-syne">VERIFY</h2>
+            <p className="text-[10px] text-muted uppercase tracking-[0.5em] font-bold">Encrypted Bridge Access</p>
+          </div>
+          <form onSubmit={handleAuth} className="space-y-6">
+            <input
+              type="password"
+              placeholder="PASSCODE"
+              className="input-premium w-full text-2xl tracking-[0.3em]"
+              value={passcode}
+              onChange={e => setPasscode(e.target.value)}
+            />
+            <button type="submit" className="btn-premium w-full flex items-center justify-center gap-3">
+              <Zap size={16} /> UNLOCK PORTAL
+            </button>
+          </form>
         </motion.div>
       </div>
     );
   }
 
-  if (isPanic) return <div className="min-h-screen bg-black flex items-center justify-center cursor-pointer" onClick={() => setIsPanic(false)}><div className="text-[10px] text-white/5 uppercase tracking-[1em] animate-pulse">System Offline</div></div>
+  if (isPanic) {
+    return (
+      <div className="min-h-screen bg-black flex flex-col items-center justify-center cursor-pointer space-y-8" onClick={() => setIsPanic(false)}>
+        <Shield size={100} className="text-white/5 animate-pulse" />
+        <div className="text-[12px] text-white/10 uppercase tracking-[1.5em] font-bold">PROTOCOL: SILENCE</div>
+      </div>
+    );
+  }
 
   if (!role) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-6 bg-mesh">
-        <div className="grid md:grid-cols-2 gap-8 max-w-4xl w-full">
-          <motion.div whileHover={{ scale: 1.02 }} className="glass p-12 text-center space-y-8 cursor-pointer border-indigo-500/10" onClick={() => setRole('controller')}>
-            <Gamepad2 className="mx-auto text-indigo-400" size={64} />
-            <h2 className="text-3xl font-black text-gradient-cyan italic uppercase">Controller</h2>
-            <p className="text-[10px] text-muted tracking-widest uppercase">Direct Influence</p>
-          </motion.div>
-          <motion.div whileHover={{ scale: 1.02 }} className="glass p-12 text-center space-y-8 cursor-pointer border-purple-500/10" onClick={() => setRole('bridge')}>
-            <Activity className="mx-auto text-purple-400" size={64} />
-            <h2 className="text-3xl font-black text-gradient italic uppercase">Bridge</h2>
-            <p className="text-[10px] text-muted tracking-widest uppercase">Physical Link</p>
-          </motion.div>
+      <div className="min-h-screen flex items-center justify-center p-6">
+        <div className="grid md:grid-cols-2 gap-12 max-w-5xl w-full">
+          {[
+            { id: 'controller', icon: Gamepad2, title: 'CONTROLLER', desc: 'Direct Neural Influence', theme: 'cyan' },
+            { id: 'bridge', icon: Activity, title: 'BRIDGE', desc: 'Physical Sensation Interface', theme: 'purple' }
+          ].map((r) => (
+            <motion.div
+              key={r.id}
+              whileHover={{ scale: 1.02, y: -10 }}
+              className={`glass p-16 text-center space-y-10 cursor-pointer border-${r.theme}-500/10 group`}
+              onClick={() => setRole(r.id)}
+            >
+              <div className="relative">
+                <r.icon className={`mx-auto text-${r.theme}-400 group-hover:scale-110 transition-transform`} size={80} />
+                <div className={`absolute inset-0 bg-${r.theme}-500/10 blur-3xl opacity-0 group-hover:opacity-100 transition-opacity`} />
+              </div>
+              <div className="space-y-4">
+                <h2 className={`text-4xl font-black italic uppercase font-syne ${r.id === 'controller' ? 'text-gradient-cyan' : 'text-gradient'}`}>{r.title}</h2>
+                <p className="text-[10px] text-muted tracking-[0.5em] uppercase font-black">{r.desc}</p>
+              </div>
+            </motion.div>
+          ))}
         </div>
       </div>
     );
@@ -229,174 +339,164 @@ function App() {
 
   return (
     <div className="app-container">
-      {/* Floating Reactions Overlay */}
       <AnimatePresence>
         {reactions.map(r => (
-          <motion.div key={r.id} initial={{ y: 0, opacity: 1, scale: 0.5 }} animate={{ y: -200, opacity: 0, scale: 2 }} exit={{ opacity: 0 }} className="reaction-particle" style={{ left: `${r.x}%`, top: `${r.y}%` }}>{r.emoji}</motion.div>
+          <motion.div
+            key={r.id}
+            initial={{ y: 0, opacity: 1, scale: 0.5 }}
+            animate={{ y: -300, opacity: 0, scale: 2 }}
+            className="reaction-particle"
+            style={{ left: `${r.x}%`, top: `${r.y}%` }}
+          >
+            {r.emoji}
+          </motion.div>
         ))}
       </AnimatePresence>
 
-      <nav className="glass p-6 mb-8 flex flex-col md:flex-row justify-between items-center rounded-[2rem] gap-4 border-white/5">
-        <div className="flex items-center gap-4">
-          <Zap className="text-purple-400" size={24} />
-          <div className="flex flex-col">
-            <h1 className="text-xl font-black italic tracking-tighter uppercase leading-tight">TRUEFORM.<span className="text-gradient">BRIDGE</span></h1>
-            <div className={`text-[9px] uppercase tracking-widest flex items-center gap-1 font-bold ${connected ? 'text-cyan-400' : 'text-rose-400'}`}>
-              <Radio size={10} className={connected ? 'animate-pulse' : ''} /> {status}
+      <nav className="glass px-10 py-6 flex flex-col lg:flex-row justify-between items-center rounded-[3rem] gap-8">
+        <div className="flex items-center gap-6">
+          <div className="bg-purple-500/10 p-3 rounded-2xl border border-purple-500/20">
+            <Zap className="text-purple-400" size={28} />
+          </div>
+          <div>
+            <h1 className="text-3xl font-black italic tracking-tighter uppercase font-syne leading-none">TRUEFORM.<span className="text-gradient">BRIDGE</span></h1>
+            <div className={`text-[10px] font-black uppercase tracking-[0.5em] flex items-center gap-2 mt-1 ${connected ? 'text-emerald-400' : 'text-rose-400'}`}>
+              <div className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
+              {status} <span className="text-white/10">|</span> 0.04ms LATENCY
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-6">
-          <div className="hidden md:flex gap-6">
+        <div className="flex items-center gap-8">
+          <div className="nav-cluster">
             {['controls', 'play', 'vault'].map(tab => (
-              <span key={tab} className={`nav-link text-[10px] font-black uppercase tracking-widest cursor-pointer transition-all ${activeTab === tab ? 'text-white' : 'text-white/30 hover:text-white/60'}`} onClick={() => setActiveTab(tab)}>{tab}</span>
+              <span key={tab} className={`nav-link ${activeTab === tab ? 'active' : ''}`} onClick={() => setActiveTab(tab)}>{tab}</span>
             ))}
           </div>
-          <div className="h-6 w-px bg-white/10" />
-          <div className="flex -space-x-1.5 items-center">
+          <div className="h-10 w-px bg-white/5" />
+          <div className="flex -space-x-2">
             {participants.map(p => (
-              <div key={p.id} className={`w-7 h-7 rounded-full border border-black shadow-lg flex items-center justify-center text-[9px] font-black ${p.role === 'controller' ? 'bg-cyan-600' : 'bg-purple-600'}`} title={p.role}>
-                {p.role[0].toUpperCase()}
-              </div>
+              <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} key={p.id} className={`w-8 h-8 rounded-full border-2 border-black flex items-center justify-center text-[10px] font-black shadow-2xl ${p.role === 'controller' ? 'bg-cyan-600' : 'bg-purple-600'}`}>{p.role[0].toUpperCase()}</motion.div>
             ))}
-            {participants.length === 0 && <span className="text-[8px] text-white/20 uppercase tracking-widest ml-4">Lone Session</span>}
           </div>
-          <div className="flex gap-3">
-            <button onClick={() => setIsPanic(true)} className="w-10 h-10 rounded-full glass border-white/5 flex items-center justify-center hover:bg-rose-500/10 transition-all text-white/40 hover:text-rose-400 group"><Shield size={18} className="group-hover:fill-rose-400/20" /></button>
-            <button onClick={() => setRole(null)} className="w-10 h-10 rounded-full glass border-white/5 flex items-center justify-center hover:bg-white/10 transition-all text-white/20 hover:text-white"><LogOut size={16} /></button>
+          <div className="flex gap-4">
+            <button onClick={() => setIsPanic(true)} className="w-12 h-12 rounded-2xl glass border-white/5 flex items-center justify-center hover:bg-rose-500/10 text-white/30 hover:text-rose-400 group transition-all"><Shield size={24} className="group-hover:fill-rose-400/10" /></button>
+            <button onClick={() => setRole(null)} className="w-12 h-12 rounded-2xl glass border-white/5 flex items-center justify-center hover:bg-white/10 text-white/20 hover:text-white transition-all"><LogOut size={20} /></button>
           </div>
         </div>
       </nav>
 
       <div className="main-content-grid">
-        <div className="left-panel space-y-8">
-
-          {/* Reaction Theatre / Character Stage */}
-          <div className="glass overflow-hidden rounded-[3rem] border-white/5 aspect-video relative group">
+        <div className="space-y-8">
+          <div className={`reaction-stage glass ${speed > 40 ? 'beat-active' : ''}`}>
             <AnimatePresence mode="wait">
               <motion.img
                 key={getReactionImage()}
                 src={getReactionImage()}
-                initial={{ opacity: 0, scale: 1.1 }}
+                initial={{ opacity: 0, scale: 1.05 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.95 }}
-                transition={{ duration: 0.8 }}
-                className="w-full h-full object-cover grayscale-[0.2] sepia-[0.1]"
+                transition={{ duration: 1.2 }}
+                className="w-full h-full object-cover grayscale-[0.3]"
               />
             </AnimatePresence>
-            <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-black/40 pointer-events-none" />
-            <div className="absolute bottom-6 left-8">
-              <div className="flex items-center gap-3">
-                <div className="w-2 h-2 bg-rose-500 rounded-full animate-pulse" />
-                <span className="text-[10px] font-black uppercase tracking-[0.3em] text-white/60 italic">Live Reaction Feed</span>
+            <div className="stage-overlay" />
+            <div className="absolute inset-0 border-[20px] border-black/20 pointer-events-none rounded-[3.5rem]" />
+            <div className="absolute top-10 left-10 flex flex-col gap-2">
+              <div className="flex items-center gap-3 bg-black/60 backdrop-blur-md px-4 py-2 rounded-xl border border-white/5">
+                <Activity size={14} className="text-rose-500 animate-pulse" />
+                <span className="text-[10px] font-black uppercase tracking-[0.3em] text-white/60">Stage Active</span>
               </div>
             </div>
             {connected && (
-              <div className="absolute top-6 right-8 flex gap-2">
-                <button onClick={() => { if (ws) ws.send(JSON.stringify({ action: 'reaction', value: '🔥' })); spawnReaction('🔥') }} className="p-3 glass rounded-2xl hover:bg-orange-500/20 transition-all"><Flame size={20} className="text-orange-400" /></button>
-                <button onClick={() => { if (ws) ws.send(JSON.stringify({ action: 'reaction', value: '❤️' })); spawnReaction('❤️') }} className="p-3 glass rounded-2xl hover:bg-pink-500/20 transition-all"><Heart size={20} className="text-pink-400" /></button>
+              <div className="absolute top-10 right-10 flex gap-4">
+                <button onClick={() => { if (ws) ws.send(JSON.stringify({ action: 'reaction', value: '🔥' })); spawnReaction('🔥') }} className="p-4 glass rounded-[1.5rem] hover:bg-orange-500/30 transition-all border-orange-500/20"><Flame size={24} className="text-orange-400" /></button>
+                <button onClick={() => { if (ws) ws.send(JSON.stringify({ action: 'reaction', value: '❤️' })); spawnReaction('❤️') }} className="p-4 glass rounded-[1.5rem] hover:bg-pink-500/30 transition-all border-pink-500/20"><Heart size={24} className="pink-pink-400 text-pink-400" /></button>
               </div>
             )}
+            <div className="absolute bottom-10 inset-x-10">
+              <div className="intensity-meter">
+                <div className="intensity-bar" style={{ width: `${speed}%` }} />
+              </div>
+            </div>
           </div>
 
-          <div className="glass p-8 space-y-8">
-            <div className="flex justify-between items-center">
-              <h2 className="text-xl font-black italic tracking-tighter uppercase flex items-center gap-2"><Zap size={20} className="text-cyan-400" /> Kinetic Engine</h2>
-              <div className="text-3xl font-black italic tracking-tighter text-white">{speed}%</div>
+          <div className="glass p-10 space-y-10">
+            <div className="flex justify-between items-end">
+              <div className="space-y-1">
+                <h2 className="text-2xl font-black italic tracking-tighter uppercase font-syne">KINETIC DRIVE</h2>
+                <p className="text-[10px] text-muted tracking-[0.4em] uppercase font-bold">Synchronized Pulse Matrix</p>
+              </div>
+              <div className="text-5xl font-black italic tracking-tight font-syne text-purple-400">{speed}<span className="text-xl text-white/20 opacity-40">%</span></div>
             </div>
 
             {role === 'controller' ? (
-              <div className="space-y-8">
-                <input type="range" min="0" max="100" value={speed} onChange={e => updateSpeed(e.target.value)} className="w-full accent-cyan-400" />
+              <div className="space-y-10">
+                <input type="range" min="0" max="100" value={speed} onChange={e => updateSpeed(e.target.value)} className="w-full h-2 rounded-lg bg-white/5 accent-purple-500 cursor-pointer" />
                 <div className="grid grid-cols-4 gap-4">
                   {[
                     { icon: ThumbsUp, color: 'text-emerald-400', emoji: '👍' },
                     { icon: ThumbsDown, color: 'text-rose-400', emoji: '👎' },
-                    { icon: Sparkles, color: 'text-purple-400', emoji: '✨' },
+                    { icon: Sparkles, color: 'text-cyan-400', emoji: '✨' },
                     { icon: Volume2, color: 'text-indigo-400', emoji: '🔊' }
                   ].map((btn, i) => (
-                    <button key={i} onClick={() => { if (ws) ws.send(JSON.stringify({ action: 'reaction', value: btn.emoji })); spawnReaction(btn.emoji) }} className="btn-secondary aspect-square flex items-center justify-center group">
-                      <btn.icon className={`${btn.color} group-hover:scale-125 transition-transform`} size={24} />
+                    <button key={i} onClick={() => { if (ws) ws.send(JSON.stringify({ action: 'reaction', value: btn.emoji })); spawnReaction(btn.emoji) }} className="btn-secondary group">
+                      <btn.icon className={`${btn.color} group-hover:scale-125 transition-all drop-shadow-[0_0_10px_rgba(255,255,255,0.1)]`} size={28} />
                     </button>
                   ))}
                 </div>
               </div>
             ) : (
-              <div className="visualizer-display glass-premium rounded-[2.5rem] p-12 text-center relative overflow-hidden">
-                <motion.div animate={{ scale: 1 + (speed / 100), opacity: 0.1 + (speed / 100) }} className="absolute inset-0 bg-cyan-500/20 blur-3xl rounded-full" />
-                <span className="relative text-[10px] text-white/30 font-black uppercase tracking-widest">Awaiting Command Link...</span>
+              <div className="py-12 flex flex-col items-center justify-center gap-6 border-2 border-dashed border-white/5 rounded-[2rem]">
+                <Signal size={40} className="text-white/10 animate-pulse" />
+                <span className="text-[11px] text-white/30 font-black uppercase tracking-[0.6em]">Listening for Neural Sync...</span>
               </div>
             )}
           </div>
         </div>
 
-        <div className="right-panel space-y-8">
-          {/* Active Connections Modernized */}
-          <div className="glass p-8 space-y-6">
-            <h2 className="text-xl font-black italic tracking-tighter uppercase flex items-center gap-2"><Users size={20} className="text-purple-400" /> Secured Link</h2>
-            <div className="space-y-3">
-              {participants.map(p => (
-                <div key={p.id} className="flex items-center justify-between p-4 glass-premium rounded-2xl border-white/5 group hover:border-white/10 transition-all">
-                  <div className="flex items-center gap-3">
-                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${p.role === 'controller' ? 'bg-cyan-500/10 text-cyan-400' : 'bg-purple-500/10 text-purple-400'}`}>
-                      {p.role === 'controller' ? <Gamepad2 size={18} /> : <Activity size={18} />}
-                    </div>
-                    <div>
-                      <p className="text-xs font-black uppercase text-white tracking-widest leading-none mb-1">{p.role}</p>
-                      <p className="text-[9px] text-white/20 font-bold uppercase tracking-tighter">Synced {new Date(p.joinedAt).toLocaleTimeString()}</p>
-                    </div>
-                  </div>
-                  <div className="text-[8px] font-mono text-white/10 group-hover:text-cyan-400/40 transition-colors">#{p.id}</div>
-                </div>
-              ))}
-              {participants.length === 0 && <div className="py-6 text-center text-white/5 uppercase font-black text-[10px] tracking-[0.3em]">Channel Vacant</div>}
+        <div className="space-y-8">
+          <div className="glass p-10 space-y-8">
+            <div className="flex items-center gap-4">
+              <Radio className="text-cyan-400" size={24} />
+              <h2 className="text-xl font-black font-syne italic tracking-tighter uppercase">LOCAL NODE</h2>
             </div>
 
-            <div className="pt-4 space-y-4">
+            <div className="space-y-4">
               <div className="relative">
-                <input type="text" value={deviceId} onChange={e => setDeviceId(e.target.value)} disabled={connected} className="input-premium h-12 text-xs font-bold tracking-widest uppercase border-white/5" />
-                <button onClick={connectWS} className="absolute right-1 top-1 bottom-1 px-4 glass rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-white/5 transition-all">{connected ? 'STAGING' : 'BRIDGE'}</button>
+                <div className="absolute left-6 top-1/2 -translate-y-1/2 text-white/20"><Cpu size={18} /></div>
+                <input type="text" value={deviceId} onChange={e => setDeviceId(e.target.value)} disabled={connected} className="input-premium w-full pl-16 text-xs font-black tracking-widest uppercase" />
               </div>
-              {role === 'bridge' && (
-                <button onClick={connectBLE} className={`w-full h-16 btn-premium flex items-center justify-center gap-3 transition-colors ${bleDevice ? 'bg-emerald-600 border-emerald-400/40' : 'hover:border-white/20'}`}>
-                  <Bluetooth size={20} /> <span className="uppercase font-black text-xs tracking-widest">{bleDevice ? 'HARDWARE ACTIVE' : 'LINK HARDWARE'}</span>
-                </button>
-              )}
-              {role === 'bridge' && (
-                <button onClick={copyInvite} className="w-full h-12 glass border-white/5 text-cyan-400 text-[9px] font-black tracking-widest flex items-center justify-center gap-2 hover:bg-cyan-400/5 transition-all">
-                  <Copy size={14} /> COPY ACCESS PORTAL
-                </button>
-              )}
+              <button onClick={connectWS} className={`btn-premium w-full flex items-center justify-center gap-3 ${connected ? 'border-purple-500/40 text-purple-400' : ''}`}>
+                {connected ? <RefreshCw className="animate-spin-slow" size={16} /> : <Zap size={16} />}
+                {connected ? 'RE-SYNC CORE' : 'ESTABLISH TUNNEL'}
+              </button>
             </div>
+
+            {role === 'bridge' && (
+              <div className="space-y-4 pt-4">
+                <button onClick={connectBLE} className={`w-full py-6 glass rounded-[1.5rem] flex items-center justify-center gap-4 group transition-all ${bleDevice ? 'bg-emerald-500/10 border-emerald-500/40' : 'hover:border-white/20'}`}>
+                  <Bluetooth size={24} className={bleDevice ? 'text-emerald-400' : 'text-white/20'} />
+                  <span className="uppercase font-black text-xs tracking-[0.2em]">{bleDevice ? 'LINK ACTIVE' : 'BIND HARDWARE'}</span>
+                </button>
+                <button onClick={copyInvite} className="w-full py-4 glass-premium rounded-[1.25rem] text-cyan-400 text-[10px] font-black tracking-widest flex items-center justify-center gap-3 hover:bg-cyan-400/5 transition-all group">
+                  <Copy size={16} className="group-hover:rotate-12 transition-transform" /> SHARE PORTAL ENTRY
+                </button>
+              </div>
+            )}
           </div>
 
-          <div className="glass p-8 space-y-6">
-            <h2 className="text-xl font-black italic tracking-tighter uppercase flex items-center gap-2"><LayoutGrid size={20} className="text-indigo-400" /> Presets</h2>
-            <div className="grid grid-cols-2 gap-3">
-              {PATTERNS.slice(0, 8).map(p => (
-                <button
-                  key={p.id}
-                  onClick={() => { setActivePattern(p.id); if (ws) ws.send(JSON.stringify({ action: 'pattern', value: p.id })); sendBLECommand(p.id, speed || 50); }}
-                  className={`p-4 rounded-[1.5rem] text-[9px] font-black uppercase tracking-widest border transition-all ${activePattern === p.id ? 'bg-gradient-to-br from-indigo-500 to-purple-600 border-white/20 text-white shadow-2xl scale-[1.02]' : 'bg-white/[0.02] border-white/5 text-white/30 hover:border-indigo-500/40'}`}
-                >
-                  {p.name}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="glass p-8 space-y-4">
+          <div className="glass p-10 space-y-6">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-white/20">
-                <Terminal size={14} />
-                <h2 className="text-[10px] font-black uppercase tracking-widest italic">Protocol Output</h2>
-              </div>
-              <button onClick={() => setLogs([])} className="p-1.5 glass rounded-lg hover:text-rose-400 transition-colors"><Trash2 size={12} /></button>
+              <h2 className="text-xl font-black font-syne italic tracking-tighter uppercase">PROTOCOL LOG</h2>
+              <button onClick={() => setLogs([])} className="text-white/20 hover:text-rose-400 transition-colors"><Trash2 size={16} /></button>
             </div>
-            <div className="h-44 overflow-y-auto custom-scrollbar font-mono text-[9px] space-y-2 opacity-40 bg-black/40 p-5 rounded-[2rem] border border-white/5">
-              {logs.length === 0 ? <div className="text-white/10 italic">Secure handshake log empty...</div> : logs.map((log, i) => (
-                <div key={i} className="border-b border-white/2 pb-1 leading-relaxed">{log}</div>
+            <div className="h-64 overflow-y-auto custom-scrollbar font-mono text-[10px] space-y-3 bg-black/60 p-6 rounded-[2rem] border border-white/5">
+              {logs.length === 0 ? <div className="text-white/10 uppercase tracking-widest italic animate-pulse">Scanning for data...</div> : logs.map((log, i) => (
+                <motion.div initial={{ x: -10, opacity: 0 }} animate={{ x: 0, opacity: 1 }} key={i} className="flex gap-4 border-l-2 border-white/5 pl-4 py-1">
+                  <span className="text-white/10 whitespace-nowrap">{log.split(' ')[0]}</span>
+                  <span className="text-white/60 leading-relaxed">{log.split(' ').slice(1).join(' ')}</span>
+                </motion.div>
               ))}
             </div>
           </div>
